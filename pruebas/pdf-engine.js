@@ -43,7 +43,7 @@ async function generate(order,settings){
  const logo=await loadLogo(settings.logo);const c=document.createElement('canvas');c.width=W;c.height=12000;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';let y=PAD;
  function txt(t,size=9,bold=false,center=false){const font=Math.round(size*PX*0.36);x.font=`${bold?'700':'400'} ${font}px Arial,sans-serif`;const max=W-PAD*2;const words=String(t??'').split(/\s+/);let line='';const lines=[];for(const word of words){const test=line?line+' '+word:word;if(x.measureText(test).width>max&&line){lines.push(line);line=word;}else line=test;}if(line)lines.push(line);for(const part of lines){y+=font*1.32;x.textAlign=center?'center':'left';x.fillText(part,center?W/2:PAD,y);y+=font*.28;}y+=5;}
  function rule(){y+=12;x.fillRect(PAD,y,W-PAD*2,2);y+=15;}
- if(logo){const clean=cleanLogo(logo);const w=Math.min(W-PAD*2,480),h=Math.min(190,clean.height/clean.width*w);x.save();x.fillStyle='#fff';x.fillRect((W-w)/2,y,w,h);x.drawImage(clean,(W-w)/2,y,w,h);x.restore();y+=h+15;}else txt('GULA',19,true,true);
+ if(logo){const clean=cleanLogo(logo);const w=Math.min(W-PAD*2,310),h=Math.min(150,clean.height/clean.width*w);x.save();x.fillStyle='#fff';x.fillRect((W-w)/2,y,w,h);x.drawImage(clean,(W-w)/2,y,w,h);x.restore();y+=h+15;}else txt('GULA',19,true,true);
  txt('COMANDA N.º '+String(order.number).padStart(3,'0'),10,true,true);rule();
  txt('Cliente: '+order.customer,9,true);if(order.phone)txt('Tel: '+order.phone,8);
  txt('Fecha: '+(order.created?new Date(order.created).toLocaleDateString('es-CL'):'Sin fecha'),8);
