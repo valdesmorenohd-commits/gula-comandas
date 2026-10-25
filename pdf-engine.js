@@ -4,22 +4,26 @@ const MM=72/25.4, PX=12, W=58*PX, PAD=4*PX;
 const fmt=n=>'$'+Math.round(Number(n)||0).toLocaleString('es-CL');
 function loadLogo(src){return new Promise(resolve=>{if(!src)return resolve(null);const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>resolve(null);img.src=src;});}
 function cleanLogo(img){
- // Convierte el fondo claro crema a blanco y recorta los márgenes vacíos.
  const c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;
- const g=c.getContext('2d',{willReadFrequently:true});g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
- const data=g.getImageData(0,0,c.width,c.height),p=data.data;let left=c.width,top=c.height,right=-1,bottom=-1;
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(img,0,0);
+ const data=g.getImageData(0,0,c.width,c.height),p=data.data;
+ let left=c.width,top=c.height,right=-1,bottom=-1;
  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){
-  const k=(y*c.width+x)*4,r=p[k],gg=p[k+1],b=p[k+2];
-  // Los fondos crema son muy claros; conserva el verde oscuro del trazo.
-  if(Math.min(r,gg,b)>175 && Math.max(r,gg,b)-Math.min(r,gg,b)<55){p[k]=p[k+1]=p[k+2]=255;}
-  else if((r+gg+b)/3<150){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+  const k=(y*c.width+x)*4,r=p[k],green=p[k+1],blue=p[k+2],alpha=p[k+3];
+  // Eliminar negro exterior y fondo blanco/crema; conservar tinta verde oliva.
+  const dark=Math.max(r,green,blue)<48;
+  const light=Math.min(r,green,blue)>205;
+  const ink=alpha>20&&!dark&&!light&&green>=r*.72&&green>=blue*.7;
+  if(ink){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+  if(dark||light){p[k+3]=0;}
  }
  g.putImageData(data,0,0);
  if(right<left)return c;
- const margin=Math.max(5,Math.round(Math.max(right-left,bottom-top)*0.07));
- left=Math.max(0,left-margin);top=Math.max(0,top-margin);right=Math.min(c.width-1,right+margin);bottom=Math.min(c.height-1,bottom+margin);
+ const margin=Math.max(8,Math.round((right-left)*.04));
+ left=Math.max(0,left-margin);right=Math.min(c.width-1,right+margin);
+ top=Math.max(0,top-margin);bottom=Math.min(c.height-1,bottom+margin);
  const out=document.createElement('canvas');out.width=right-left+1;out.height=bottom-top+1;
- const ctx=out.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,out.width,out.height);ctx.drawImage(c,left,top,out.width,out.height,0,0,out.width,out.height);
+ out.getContext('2d').drawImage(c,left,top,out.width,out.height,0,0,out.width,out.height);
  return out;
 }
 function jpegPDF(dataUrl,heightMM){
@@ -39,11 +43,11 @@ async function generate(order,settings){
  const logo=await loadLogo(settings.logo);const c=document.createElement('canvas');c.width=W;c.height=12000;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';let y=PAD;
  function txt(t,size=9,bold=false,center=false){const font=Math.round(size*PX*0.36);x.font=`${bold?'700':'400'} ${font}px Arial,sans-serif`;const max=W-PAD*2;const words=String(t??'').split(/\s+/);let line='';const lines=[];for(const word of words){const test=line?line+' '+word:word;if(x.measureText(test).width>max&&line){lines.push(line);line=word;}else line=test;}if(line)lines.push(line);for(const part of lines){y+=font*1.32;x.textAlign=center?'center':'left';x.fillText(part,center?W/2:PAD,y);y+=font*.28;}y+=5;}
  function rule(){y+=12;x.fillRect(PAD,y,W-PAD*2,2);y+=15;}
- if(logo){const clean=cleanLogo(logo);const h=Math.min(130,clean.height/clean.width*330),w=h*clean.width/clean.height;x.drawImage(clean,(W-w)/2,y,w,h);y+=h+15;}else txt('GULA',19,true,true);
+ if(logo){const clean=cleanLogo(logo);const w=205,h=205;x.save();x.fillStyle='#fff';x.fillRect((W-w)/2,y,w,h);x.drawImage(clean,(W-w)/2,y,w,h);x.restore();y+=h+15;}else txt('GULA',19,true,true);
  txt('COMANDA N.º '+String(order.number).padStart(3,'0'),10,true,true);rule();
  txt('Cliente: '+order.customer,9,true);if(order.phone)txt('Tel: '+order.phone,8);
  txt('Fecha: '+(order.created?new Date(order.created).toLocaleDateString('es-CL'):'Sin fecha'),8);
- txt('Entrega: '+order.date+' '+order.time,10,true);
+ txt('Entrega: '+(order.date?order.date.split('-').reverse().join('-'):'')+' a las '+order.time+' hrs.',10,true);
  txt('Tipo: '+order.deliveryType+' | Pago: '+order.payment,8);rule();
  for(const it of order.items){txt(it.qty+' x '+it.name,9,true);txt(fmt(it.price)+' c/u  =  '+fmt(it.price*it.qty),8);if(it.note)txt('Obs: '+it.note,8);y+=8;}rule();
  txt('TOTAL: '+fmt(order.total),12,true);if(order.notes){rule();txt('OBSERVACIONES:',9,true);txt(order.notes,9);}rule();
