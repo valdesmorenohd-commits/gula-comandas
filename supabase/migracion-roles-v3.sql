@@ -1,12 +1,19 @@
--- Gula v3: ejecutar en Supabase SQL Editor DESPUÉS de identificar el UID administrador.
--- Sustituir ADMIN_UID y FELIPE_UID por los IDs correctos de auth.users.
+-- Gula v3: ejecutar en Supabase SQL Editor en una sola transacción. Verificar primero el respaldo y las políticas existentes.
+begin;
+do $ begin
+ if (select count(*) from auth.users where lower(email) in ('valdesmoreno.hd@gmail.com','fortega1991@gmail.com')) <> 2 then
+  raise exception 'No se encontraron exactamente las dos cuentas de Gula. No se aplicó ningún cambio.';
+ end if;
+ if (select count(*) from public.gula_usuarios gu join auth.users au on au.id=gu.user_id where lower(au.email) in ('valdesmoreno.hd@gmail.com','fortega1991@gmail.com') and gu.activo) <> 2 then
+  raise exception 'Las dos cuentas deben estar activas en gula_usuarios. No se aplicó ningún cambio.';
+ end if;
+end $;
 alter table public.gula_usuarios add column if not exists nombre text;
 alter table public.gula_usuarios add column if not exists rol text not null default 'usuario';
 alter table public.gula_usuarios drop constraint if exists gula_usuarios_rol_check;
 alter table public.gula_usuarios add constraint gula_usuarios_rol_check check (rol in ('admin','usuario'));
--- No aplicar roles por defecto a un usuario equivocado: identificar las cuentas antes.
--- update public.gula_usuarios set nombre='Daniel',rol='admin' where user_id='ADMIN_UID';
--- update public.gula_usuarios set nombre='Felipe',rol='usuario' where user_id='FELIPE_UID';
+update public.gula_usuarios gu set nombre='Daniel',rol='admin' from auth.users au where gu.user_id=au.id and lower(au.email)='valdesmoreno.hd@gmail.com';
+update public.gula_usuarios gu set nombre='Felipe',rol='usuario' from auth.users au where gu.user_id=au.id and lower(au.email)='fortega1991@gmail.com';
 create or replace function public.gula_es_admin() returns boolean language sql stable security definer set search_path=public as $$
  select exists(select 1 from public.gula_usuarios where user_id=(select auth.uid()) and activo=true and rol='admin');
 $$;
@@ -28,3 +35,5 @@ create policy "gula_usuarios_update_admin" on public.gula_usuarios as restrictiv
 create policy "gula_usuarios_delete_admin" on public.gula_usuarios as restrictive for delete to authenticated using (public.gula_es_admin());
 create policy "gula_usuarios_insert_admin" on public.gula_usuarios as restrictive for insert to authenticated with check (public.gula_es_admin());
 -- La creación de cuentas auth.users debe hacerse con una Edge Function y service role SOLO en servidor.
+
+commit;
