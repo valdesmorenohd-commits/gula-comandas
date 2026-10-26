@@ -31,9 +31,22 @@ create policy "gula_productos_delete_admin" on public.gula_productos as restrict
 create policy "gula_configuracion_insert_admin" on public.gula_configuracion as restrictive for insert to authenticated with check (public.gula_es_admin());
 create policy "gula_configuracion_update_admin" on public.gula_configuracion as restrictive for update to authenticated using (public.gula_es_admin()) with check (public.gula_es_admin());
 create policy "gula_configuracion_delete_admin" on public.gula_configuracion as restrictive for delete to authenticated using (public.gula_es_admin());
+create policy "gula_usuarios_select_admin" on public.gula_usuarios for select to authenticated using (public.gula_es_admin());
+create policy "gula_usuarios_update_admin_allow" on public.gula_usuarios for update to authenticated using (public.gula_es_admin()) with check (public.gula_es_admin());
+create policy "gula_usuarios_insert_admin_allow" on public.gula_usuarios for insert to authenticated with check (public.gula_es_admin());
 create policy "gula_usuarios_update_admin" on public.gula_usuarios as restrictive for update to authenticated using (public.gula_es_admin()) with check (public.gula_es_admin());
 create policy "gula_usuarios_delete_admin" on public.gula_usuarios as restrictive for delete to authenticated using (public.gula_es_admin());
 create policy "gula_usuarios_insert_admin" on public.gula_usuarios as restrictive for insert to authenticated with check (public.gula_es_admin());
+-- Los administradores no deben desactivarse ni quitarse su propio rol por error.
+create or replace function public.gula_proteger_admin_propio() returns trigger language plpgsql security definer set search_path=public as $
+begin
+ if old.user_id = auth.uid() and old.rol='admin' and (new.rol<>'admin' or new.activo is distinct from true) then
+  raise exception 'No puedes quitar tu propio acceso de administrador';
+ end if;
+ return new;
+end $;
+drop trigger if exists gula_evitar_autobloqueo on public.gula_usuarios;
+create trigger gula_evitar_autobloqueo before update on public.gula_usuarios for each row execute function public.gula_proteger_admin_propio();
 -- La creación de cuentas auth.users debe hacerse con una Edge Function y service role SOLO en servidor.
 
 commit;
