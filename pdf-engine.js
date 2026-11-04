@@ -53,7 +53,7 @@ async function generate(order,settings){
  txt('TOTAL: '+fmt(order.total),12,true);if(order.notes){rule();txt('OBSERVACIONES:',9,true);txt(order.notes,9);}rule();
  if(settings.whatsapp)txt(settings.whatsapp,8,false,true);if(settings.footer)txt(settings.footer,8,false,true);
  y+=PAD;const h=Math.ceil(y);const final=document.createElement('canvas');final.width=W;final.height=h;final.getContext('2d').drawImage(c,0,0,W,h,0,0,W,h);
- return jpegPDF(final.toDataURL('image/jpeg',.90),h/PX);
+ return jpegPDF(final.toDataURL('image/jpeg',.72),h/PX);
 }
 window.GulaPDF={generate};
 })();
