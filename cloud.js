@@ -69,13 +69,33 @@ $('save').onclick=saveOrder;$('savePrint').onclick=async()=>{const o=await saveO
 function renderHistory(){
  const q=$('search').value.toLowerCase();
  const orders=db.orders.filter(o=>o.customer.toLowerCase().includes(q)||String(o.number).includes(q));
- $('historyList').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><div><b>#'+o.number+' · '+safe(o.customer)+'</b><div class="muted">Entrega: '+safe(o.date)+' '+safe(o.time)+' · '+safe(o.payment)+(o.cancelada?' · CANCELADA':'')+'</div><b>'+money(o.total)+'</b></div></div><div class="actions">'+(isAdmin&&!o.cancelada?'<button class="secondary" data-edit="'+o.id+'">Editar</button>':'')+'<button data-pdf="'+o.id+'">Compartir / Imprimir</button><button class="secondary" data-download="'+o.id+'">Descargar PDF</button>'+(isAdmin&&!o.cancelada?'<button class="danger" data-delete="'+o.id+'">Cancelar</button>':'')+'</div></div>').join(''):'<p class="muted">No hay pedidos guardados.</p>';
+ $('historyList').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><div><b>#'+o.number+' · '+safe(o.customer)+'</b><div class="muted">Entrega: '+safe(o.date)+' '+safe(o.time)+' · '+safe(o.payment)+(o.cancelada?' · CANCELADA':'')+'</div><b>'+money(o.total)+'</b></div></div><div class="actions">'+(isAdmin&&!o.cancelada?'<button class="secondary" data-edit="'+o.id+'">Editar</button>':'')+(!o.cancelada&&o.payment!=='Pagado'?'<button class="secondary" data-abonar="'+o.id+'">Abonar</button>':'')+'<button data-pdf="'+o.id+'">Compartir / Imprimir</button><button class="secondary" data-download="'+o.id+'">Descargar PDF</button>'+(isAdmin&&!o.cancelada?'<button class="danger" data-delete="'+o.id+'">Cancelar</button>':'')+'</div></div>').join(''):'<p class="muted">No hay pedidos guardados.</p>';
+ document.querySelectorAll('[data-abonar]').forEach(b=>b.onclick=()=>{const o=db.orders.find(x=>x.id===b.dataset.abonar);if(!o||o.cancelada)return;$('abonoOrder').value=o.id;$('abonoSelected').textContent='Comanda #'+o.number+' · '+o.customer+' · Total '+money(o.total);$('abonoAmount').value='';$('abonoStatus').textContent='';$('abonoAmount').focus()});
  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editOrder(b.dataset.edit));
  document.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>makePDF(db.orders.find(o=>o.id===b.dataset.pdf)));
  document.querySelectorAll('[data-download]').forEach(b=>b.onclick=()=>makePDF(db.orders.find(o=>o.id===b.dataset.download),'download'));
  document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!isAdmin)return;if(!confirm('¿Cancelar esta comanda? Se devolverá el stock reservado. No se puede cancelar si tiene pagos.'))return;try{const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);await adapter.cancelar(b.dataset.delete);await refresh();toast('Comanda cancelada; stock restituido.')}catch(e){fail(e)}});
 }
 
+let pendingAbonoKey=null;
+$('abonoSave').onclick=async()=>{
+ if(!authorized)return;
+ const id=$('abonoOrder').value,monto=Number($('abonoAmount').value),medio=$('abonoMethod').value;
+ if(!id||!Number.isSafeInteger(monto)||monto<=0)return alert('Selecciona una comanda e ingresa un monto válido.');
+ const order=db.orders.find(o=>o.id===id);
+ if(!order||order.cancelada||order.payment==='Pagado')return alert('Esta comanda no admite nuevos abonos.');
+ const btn=$('abonoSave');btn.disabled=true;
+ try{
+  const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);
+  if(!pendingAbonoKey)pendingAbonoKey=crypto.randomUUID();
+  const result=await adapter.abonar(id,monto,medio,pendingAbonoKey);
+  pendingAbonoKey=null;
+  $('abonoStatus').textContent='Abonado: '+money(result.abonado)+' · Saldo: '+money(result.saldo);
+  $('abonoAmount').value='';
+  await refresh();
+  toast('Abono registrado correctamente.');
+ }catch(e){fail(e)}finally{btn.disabled=false}
+};
 function ordersForReport(){const d=$('reportDate')?.value;return db.orders.filter(o=>o.date===d&&!o.cancelada)}
 function productSummary(orders){const products=new Map();for(const o of orders)for(const i of o.items||[]){const key=i.name||'Sin nombre',entry=products.get(key)||{name:key,qty:0,total:0};entry.qty+=Number(i.qty)||0;entry.total+=(Number(i.qty)||0)*(Number(i.price)||0);products.set(key,entry)}return [...products.values()].sort((a,b)=>b.total-a.total)}
 function renderReports(){if(!isAdmin||!$('reportSummary'))return;const orders=ordersForReport(),products=productSummary(orders),total=orders.reduce((s,o)=>s+(Number(o.total)||0),0),counts={Pagado:0,Abono:0,Pendiente:0};for(const o of orders)counts[o.payment]=(counts[o.payment]||0)+1;$('reportSummary').innerHTML='<div class="grid"><div class="item"><b>Comandas</b><p>'+orders.length+'</p></div><div class="item"><b>Total de pedidos</b><p>'+money(total)+'</p></div><div class="item">Marcadas pagadas: '+counts.Pagado+'</div><div class="item">Con abono: '+counts.Abono+'</div><div class="item">Pendientes: '+counts.Pendiente+'</div></div>';$('reportProducts').innerHTML=products.length?products.map(p=>'<div class="item row"><span>'+safe(p.name)+' · '+p.qty+' un.</span><b>'+money(p.total)+'</b></div>').join(''):'<p class="muted">No hay productos para esta fecha.</p>';$('reportOrders').innerHTML=orders.length?orders.map(o=>'<div class="item row"><span>#'+safe(o.number)+' · '+safe(o.customer)+' · '+safe(o.payment)+'</span><b>'+money(o.total)+'</b></div>').join(''):'<p class="muted">No hay comandas para esta fecha.</p>'}
