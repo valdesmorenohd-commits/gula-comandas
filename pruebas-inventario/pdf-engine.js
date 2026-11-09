@@ -51,7 +51,12 @@ async function generate(order,settings){
  for(const it of order.items){txt(it.qty+' x '+it.name,9,true);txt(fmt(it.price)+' c/u  =  '+fmt(it.price*it.qty),8);if(it.note)txt('Obs: '+it.note,8);y+=8;}rule();
  txt('TOTAL: '+fmt(order.total),12,true);
  const payments=Array.isArray(order.payments)?order.payments:[];
- if(payments.length){rule();txt('DETALLE DE PAGOS',9,true);for(const pay of payments){txt(fmt(pay.monto)+' - '+(pay.medio==='TEF'?'Transferencia (TEF)':'Efectivo'),8);}const paid=payments.reduce((n,p)=>n+(Number(p.monto)||0),0);txt('ABONADO: '+fmt(paid),9,true);txt('SALDO: '+fmt(Math.max(0,Number(order.total)-paid)),9,true)}else{txt('PAGO: PENDIENTE',8,true);txt('SALDO: '+fmt(order.total),9,true)}
+ const paid=payments.reduce((n,p)=>n+(Number(p.monto)||0),0);
+ const balance=Math.max(0,Number(order.total)-paid);
+ if(paid<=0){txt('Pago: Pendiente · Saldo '+fmt(balance),8)}
+ else if(balance>0){txt('Pago: Abonado · Saldo '+fmt(balance),8)}
+ else {const methods=[...new Set(payments.map(p=>p.medio))];const method=methods.length===1?(methods[0]==='TEF'?'TEF':'Efectivo'):'Mixto';txt('Pago: Pagado · '+method,8)}
+
  if(order.notes){rule();txt('OBSERVACIONES:',9,true);txt(order.notes,9);}rule();
  if(settings.whatsapp)txt(settings.whatsapp,8,false,true);if(settings.footer)txt(settings.footer,8,false,true);
  y+=PAD;const h=Math.ceil(y);const final=document.createElement('canvas');final.width=W;final.height=h;final.getContext('2d').drawImage(c,0,0,W,h,0,0,W,h);
