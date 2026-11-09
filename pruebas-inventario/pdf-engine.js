@@ -46,11 +46,13 @@ async function generate(order,settings){
  if(logo){const clean=cleanLogo(logo);const w=205,h=205;x.save();x.fillStyle='#fff';x.fillRect((W-w)/2,y,w,h);x.drawImage(clean,(W-w)/2,y,w,h);x.restore();y+=h+15;}else txt('GULA',19,true,true);
  txt('COMANDA N.º '+String(order.number).padStart(3,'0'),10,true,true);rule();
  txt('Cliente: '+order.customer,9,true);if(order.phone)txt('Tel: '+order.phone,8);
- txt('Fecha: '+(order.created?new Date(order.created).toLocaleDateString('es-CL'):'Sin fecha'),8);
  txt('Entrega: '+(order.date?order.date.split('-').reverse().join('-'):'')+' a las '+order.time+' hrs.',10,true);
- txt('Tipo: '+order.deliveryType+' | Pago: '+order.payment,8);rule();
+ txt('Tipo: '+order.deliveryType,8);rule();
  for(const it of order.items){txt(it.qty+' x '+it.name,9,true);txt(fmt(it.price)+' c/u  =  '+fmt(it.price*it.qty),8);if(it.note)txt('Obs: '+it.note,8);y+=8;}rule();
- txt('TOTAL: '+fmt(order.total),12,true);if(order.notes){rule();txt('OBSERVACIONES:',9,true);txt(order.notes,9);}rule();
+ txt('TOTAL: '+fmt(order.total),12,true);
+ const payments=Array.isArray(order.payments)?order.payments:[];
+ if(payments.length){rule();txt('DETALLE DE PAGOS',9,true);for(const pay of payments){txt(fmt(pay.monto)+' - '+(pay.medio==='TEF'?'Transferencia (TEF)':'Efectivo'),8);}const paid=payments.reduce((n,p)=>n+(Number(p.monto)||0),0);txt('ABONADO: '+fmt(paid),9,true);txt('SALDO: '+fmt(Math.max(0,Number(order.total)-paid)),9,true)}else{txt('PAGO: PENDIENTE',8,true);txt('SALDO: '+fmt(order.total),9,true)}
+ if(order.notes){rule();txt('OBSERVACIONES:',9,true);txt(order.notes,9);}rule();
  if(settings.whatsapp)txt(settings.whatsapp,8,false,true);if(settings.footer)txt(settings.footer,8,false,true);
  y+=PAD;const h=Math.ceil(y);const final=document.createElement('canvas');final.width=W;final.height=h;final.getContext('2d').drawImage(c,0,0,W,h,0,0,W,h);
  return jpegPDF(final.toDataURL('image/jpeg',.90),h/PX);
