@@ -9,7 +9,7 @@ let db={products:[],orders:[],settings:{footer:'Gracias por preferir Gula',whats
 const fail=e=>{console.error(e);alert('No se pudo completar la operación: '+(e?.message||e))};
 function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2500)}
 function check(r){if(r.error)throw r.error;return r.data}
-function tab(t){if(!isAdmin&&['products','settings','users'].includes(t))return;document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==t));document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.tab===t);b.classList.toggle('secondary',b.dataset.tab!==t)});if(t==='history')renderHistory();if(t==='products')renderProducts();if(t==='reports')renderReports();if(t==='users')renderUsers()}
+function tab(t){if(!isAdmin&&['products','inventory','settings','users'].includes(t))return;document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==t));document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.tab===t);b.classList.toggle('secondary',b.dataset.tab!==t)});if(t==='history')renderHistory();if(t==='products')renderProducts();if(t==='inventory')renderInventory();if(t==='reports')renderReports();if(t==='users')renderUsers()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function renderSelect(){const s=$('productSelect'),selected=s.value,q=($('productSearch')?.value||'').trim().toLocaleLowerCase('es');const found=db.products.filter(p=>p.name.toLocaleLowerCase('es').includes(q));s.innerHTML=found.map(p=>'<option value="'+safe(p.id)+'">'+safe(p.name)+'</option>').join('');if(found.some(p=>p.id===selected))s.value=selected;syncPrice()}
 $('productSearch').oninput=renderSelect;
@@ -22,7 +22,7 @@ $('addItem').onclick=()=>{const p=db.products.find(p=>p.id===$('productSelect').
 function clearForm(){if($('productSearch'))$('productSearch').value='';editing=null;['customer','phone','notes'].forEach(k=>$(k).value='');$('deliveryDate').value=localDate();$('deliveryTime').value='13:00';$('deliveryType').value='Retiro';$('payment').value='Pendiente';cart=[];$('formTitle').textContent='Nueva comanda';renderCart()}
 function fromOrder(o){const dt=o.fecha_entrega?new Date(o.fecha_entrega):null;const date=dt?new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(dt):'';const time=dt?new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(dt):'';return {id:o.id,number:o.numero,customer:o.cliente,phone:o.telefono,date,time,deliveryType:o.tipo_entrega,payment:o.estado_pago,notes:o.notas,items:o.items,total:o.total,cancelada:!!o.cancelada,created:o.creado_en}}
 function toDelivery(date,time){const naive=new Date(date+'T'+time+':00Z');const f=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit'});const parts=Object.fromEntries(f.formatToParts(naive).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));const asUTC=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute);return new Date(naive.getTime()+(naive.getTime()-asUTC)).toISOString()}
-async function refresh(){const [p,o,c]=await Promise.all([api.from('gula_productos').select('*').eq('activo',true).order('nombre'),api.from('gula_comandas').select('*').order('numero',{ascending:false}).limit(1000),api.from('gula_configuracion').select('*').eq('clave','general').maybeSingle()]);db.products=check(p).map(x=>({id:x.id,name:x.nombre,price:x.precio}));db.orders=check(o).map(fromOrder);db.settings={footer:'Gracias por preferir Gula',whatsapp:'+56 9 3306 8109',logo:'',...(check(c)?.valor||{})};renderSelect();renderHistory();renderProducts();renderReports();loadSettings()}
+async function refresh(){const [p,o,c]=await Promise.all([api.from('gula_productos').select('*').eq('activo',true).order('nombre'),api.from('gula_comandas').select('*').order('numero',{ascending:false}).limit(1000),api.from('gula_configuracion').select('*').eq('clave','general').maybeSingle()]);db.products=check(p).map(x=>({id:x.id,name:x.nombre,price:x.precio,categoria:x.categoria,controlaStock:!!x.controla_stock}));db.orders=check(o).map(fromOrder);db.settings={footer:'Gracias por preferir Gula',whatsapp:'+56 9 3306 8109',logo:'',...(check(c)?.valor||{})};renderSelect();renderHistory();renderProducts();renderReports();loadSettings()}
 // Migración de comandas: apagada hasta configurar un Supabase aislado.
 // Este interruptor NO debe activarse mientras las RPC no estén auditadas.
 const GULA_STAGING_RPC_ENABLED=true;
@@ -105,6 +105,49 @@ function exportReportCsv(){if(!isAdmin)return;const orders=ordersForReport(),dat
 
 $('search').oninput=renderHistory;
 function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i},product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();tab('new');window.scrollTo(0,0)}
+let pendingStockKey=null,pendingStockSignature=null;
+async function renderInventory(){
+ if(!isAdmin||!$('stockList'))return;
+ if(!$('stockDate').value)$('stockDate').value=localDate();
+ const date=$('stockDate').value;
+ try{
+  const [general,diario]=await Promise.all([
+   api.from('gula_stock_general').select('producto_id,disponible'),
+   api.from('gula_stock_diario').select('producto_id,disponible,cantidad_inicial').eq('fecha',date)
+  ]);
+  const generalMap=new Map(check(general).map(x=>[x.producto_id,x.disponible]));
+  const diarioMap=new Map(check(diario).map(x=>[x.producto_id,x.disponible]));
+  const products=db.products.filter(p=>p.controlaStock);
+  const select=$('stockProduct'),selected=select.value;
+  select.innerHTML=products.map(p=>'<option value="'+safe(p.id)+'">'+safe(p.name)+'</option>').join('');
+  if(products.some(p=>p.id===selected))select.value=selected;
+  $('stockList').innerHTML=products.length?products.map(p=>{
+   const isMenu=p.categoria==='MENU_FINDE';
+   const available=(isMenu?diarioMap:generalMap).get(p.id);
+   return '<div class="item row"><span><b>'+safe(p.name)+'</b><div class="muted">'+(isMenu?'Menú · '+safe(date):'Stock general')+'</div></span><b>'+(available===undefined?'Sin configurar':available+' un.')+'</b></div>';
+  }).join(''):'<p class="muted">Todavía no hay productos con control de stock.</p>';
+ }catch(e){fail(e)}
+}
+$('stockDate').onchange=renderInventory;
+$('stockRefresh').onclick=renderInventory;
+$('stockAdjust').onclick=async()=>{
+ if(!isAdmin)return;
+ const id=$('stockProduct').value,delta=Number($('stockDelta').value),p=db.products.find(p=>p.id===id);
+ if(!p||!p.controlaStock||!Number.isSafeInteger(delta)||delta===0)return alert('Selecciona un producto y una variación válida.');
+ const date=p.categoria==='MENU_FINDE'?$('stockDate').value:null;
+ if(p.categoria==='MENU_FINDE'&&!date)return alert('Selecciona la fecha del menú.');
+ const signature=[id,date||'',delta].join(':');
+ if(pendingStockSignature!==signature){pendingStockKey=crypto.randomUUID();pendingStockSignature=signature;}
+ const btn=$('stockAdjust');btn.disabled=true;
+ try{
+  const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);
+  const result=await adapter.ajustarStock(id,date,delta,pendingStockKey);
+  pendingStockKey=null;pendingStockSignature=null;
+  $('stockDelta').value='';
+  $('stockStatus').textContent='Existencias actualizadas: '+result.disponible+' unidades.';
+  await renderInventory();toast('Inventario actualizado.');
+ }catch(e){fail(e)}finally{btn.disabled=false}
+};
 function renderProducts(){if(!isAdmin)return;$('productsList').innerHTML=db.products.map(p=>'<div class="item"><div class="grid"><div><label>Nombre</label><input data-pname="'+p.id+'" value="'+safe(p.name)+'"></div><div><label>Precio ($)</label><input type="number" min="0" step="1" data-pprice="'+p.id+'" value="'+p.price+'"></div></div><div class="actions"><button class="secondary" data-psave="'+p.id+'">Guardar cambios</button><button class="danger" data-pdel="'+p.id+'">Eliminar</button></div></div>').join('');document.querySelectorAll('[data-psave]').forEach(b=>b.onclick=async()=>{if(!isAdmin)return;const id=b.dataset.psave,name=document.querySelector('[data-pname="'+id+'"]').value.trim(),price=Number(document.querySelector('[data-pprice="'+id+'"]').value);if(!name||!Number.isInteger(price)||price<0)return alert('Revisa nombre y precio.');if(db.products.some(p=>p.id!==id&&p.name.toLocaleLowerCase('es')===name.toLocaleLowerCase('es')))return alert('Ya existe otro producto con ese nombre.');try{check(await api.from('gula_productos').update({nombre:name,precio:price,actualizado_en:new Date().toISOString()}).eq('id',id).select());toast('Producto actualizado');await refresh()}catch(e){fail(e)}});document.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este producto del catálogo?'))return;try{check(await api.from('gula_productos').update({activo:false}).eq('id',b.dataset.pdel).select());await refresh()}catch(e){fail(e)}})}
 
 $('addProduct').onclick=async()=>{if(!isAdmin)return;const name=$('productName').value.trim(),price=Number($('productPrice').value);if(!name||!Number.isInteger(price)||price<0)return alert('Ingresa nombre y precio válido.');const old=db.products.find(p=>p.name.toLowerCase()===name.toLowerCase());if(old&&!confirm('Este producto existe. ¿Actualizar precio?'))return;try{check(old?await api.from('gula_productos').update({precio:price,actualizado_en:new Date().toISOString()}).eq('id',old.id).select():await api.from('gula_productos').insert({nombre:name,precio:price}).select());$('productName').value='';$('productPrice').value='';await refresh()}catch(e){fail(e)}};
