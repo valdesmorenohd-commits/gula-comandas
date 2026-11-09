@@ -18,7 +18,29 @@ $('qtyPlus').onclick=()=>{$('qty').value=Math.max(1,(Number($('qty').value)||0)+
 function syncPrice(){const p=db.products.find(p=>p.id===$('productSelect').value);$('unitPrice').value=p?.price??0}
 $('productSelect').onchange=syncPrice;
 function renderCart(){$('cart').innerHTML=cart.map((i,k)=>'<div class="item"><div class="row"><div><b>'+safe(i.qty)+' × '+safe(i.name)+'</b><div class="muted">'+money(i.price)+' c/u '+safe(i.note)+'</div></div><div><b>'+money(i.qty*i.price)+'</b><br><button class="danger" data-remove="'+k+'">Quitar</button></div></div></div>').join('');$('total').textContent=money(cart.reduce((s,i)=>s+i.qty*i.price,0));document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{cart.splice(Number(b.dataset.remove),1);renderCart()})}
-$('addItem').onclick=()=>{const p=db.products.find(p=>p.id===$('productSelect').value),qty=Number($('qty').value),price=Number($('unitPrice').value);if(!p||!Number.isInteger(qty)||qty<1||!Number.isInteger(price)||price<0)return alert('Revisa cantidad y precio.');cart.push({product_id:p.id,name:p.name,qty,price,note:$('itemNote').value.trim()});$('qty').value=1;$('itemNote').value='';renderCart()};
+$('addItem').onclick=async()=>{
+ const btn=$('addItem');
+ if(btn.disabled)return;
+ const p=db.products.find(p=>p.id===$('productSelect').value),qty=Number($('qty').value),price=Number($('unitPrice').value);
+ if(!p||!Number.isInteger(qty)||qty<1||!Number.isInteger(price)||price<0)return alert('Revisa cantidad y precio.');
+ btn.disabled=true;
+ try{
+  if(p.controlaStock){
+   const requested=qty+cart.filter(i=>i.product_id===p.id).reduce((sum,i)=>sum+i.qty,0);
+   const date=$('deliveryDate').value;
+   const isMenu=p.categoria==='MENU_FINDE';
+   if(isMenu&&!date)return alert('Selecciona una fecha de entrega para comprobar el stock del menú.');
+   const q=isMenu?api.from('gula_stock_diario').select('disponible').eq('producto_id',p.id).eq('fecha',date).maybeSingle():api.from('gula_stock_general').select('disponible').eq('producto_id',p.id).maybeSingle();
+   const row=check(await q);
+   if(!row)return alert('Stock sin configurar para '+p.name+(isMenu?' el '+date:'')+'. Ingresa el stock inicial en Inventario.');
+   const available=Number(row.disponible);
+   if(available===0)return alert('Producto agotado: '+p.name+'. Stock disponible: 0 unidades.');
+   if(available<requested)return alert('Stock insuficiente para '+p.name+'. Disponible: '+available+' '+(available===1?'unidad':'unidades')+'. Solicitado: '+requested+'.');
+  }
+  cart.push({product_id:p.id,name:p.name,qty,price,note:$('itemNote').value.trim()});
+  $('qty').value=1;$('itemNote').value='';renderCart();
+ }catch(e){fail(e)}finally{btn.disabled=false}
+};
 function clearForm(){if($('productSearch'))$('productSearch').value='';editing=null;['customer','phone','notes'].forEach(k=>$(k).value='');$('deliveryDate').value=localDate();$('deliveryTime').value='13:00';$('deliveryType').value='Retiro';$('payment').value='Pendiente';cart=[];$('initialPaymentAmount').value='';$('initialPaymentMethod').value='EFECTIVO';$('formTitle').textContent='Nueva comanda';renderCart();updateInitialPaymentUI()}
 function fromOrder(o){const dt=o.fecha_entrega?new Date(o.fecha_entrega):null;const date=dt?new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(dt):'';const time=dt?new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(dt):'';return {id:o.id,number:o.numero,customer:o.cliente,phone:o.telefono,date,time,deliveryType:o.tipo_entrega,payment:o.estado_pago,notes:o.notas,items:o.items,total:o.total,cancelada:!!o.cancelada,created:o.creado_en}}
 function toDelivery(date,time){const naive=new Date(date+'T'+time+':00Z');const f=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit'});const parts=Object.fromEntries(f.formatToParts(naive).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));const asUTC=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute);return new Date(naive.getTime()+(naive.getTime()-asUTC)).toISOString()}
