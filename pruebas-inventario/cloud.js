@@ -194,18 +194,27 @@ $('abonoSave').onclick=async()=>{
 function ordersForReport(){const d=$('reportDate')?.value;return db.orders.filter(o=>o.date===d&&!o.cancelada)}
 function productSummary(orders){const products=new Map();for(const o of orders)for(const i of o.items||[]){const key=i.name||'Sin nombre',entry=products.get(key)||{name:key,qty:0,total:0};entry.qty+=Number(i.qty)||0;entry.total+=(Number(i.qty)||0)*(Number(i.price)||0);products.set(key,entry)}return [...products.values()].sort((a,b)=>b.total-a.total)}
 function reportPayments(orders){return orders.flatMap(o=>(o.payments||[]).map(p=>({...p,orderNumber:o.number})))}
-function renderReports(){
+async function renderReports(){
  if(!isAdmin||!$('reportSummary'))return;
- const orders=ordersForReport(),products=productSummary(orders),total=orders.reduce((s,o)=>s+(Number(o.total)||0),0),counts={Pagado:0,Abono:0,Pendiente:0};
+ const date=$('reportDate').value;
+ const orders=ordersForReport(),products=productSummary(orders),total=orders.reduce((n,o)=>n+Number(o.total||0),0),counts={Pagado:0,Abono:0,Pendiente:0};
  for(const o of orders)counts[o.payment]=(counts[o.payment]||0)+1;
  const payments=reportPayments(orders);
  const cash=payments.filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0);
  const tef=payments.filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0);
- const received=cash+tef;
- $('reportSummary').innerHTML='<div class="grid"><div class="item"><b>Comandas</b><p>'+orders.length+'</p></div><div class="item"><b>Total de pedidos</b><p>'+money(total)+'</p></div><div class="item"><b>Recibido en efectivo</b><p>'+money(cash)+'</p></div><div class="item"><b>Recibido por TEF</b><p>'+money(tef)+'</p></div><div class="item"><b>Total recaudado</b><p>'+money(received)+'</p></div><div class="item">Marcadas pagadas: '+counts.Pagado+'</div><div class="item">Con abono: '+counts.Abono+'</div><div class="item">Pendientes: '+counts.Pendiente+'</div></div>';
+ let exits=[];
+ try{
+  const result=await api.from('gula_salidas_caja').select('tipo,monto,medio,creado_en,anulada_en').order('creado_en',{ascending:false}).limit(5000);
+  exits=check(result).filter(x=>!x.anulada_en&&cashLocalDate(x.creado_en)===date);
+ }catch(e){$('reportSummary').textContent='No se pudieron consultar las salidas de caja. '+String(e.message||e);return}
+ const sum=(rows,medio)=>rows.filter(x=>x.medio===medio).reduce((n,x)=>n+Number(x.monto||0),0);
+ const expense=exits.filter(x=>x.tipo==='GASTO'),withdrawals=exits.filter(x=>x.tipo==='RETIRO_PERSONAL');
+ const expenseCash=sum(expense,'EFECTIVO'),expenseTef=sum(expense,'TEF'),withdrawCash=sum(withdrawals,'EFECTIVO'),withdrawTef=sum(withdrawals,'TEF');
+ const out=expenseCash+expenseTef+withdrawCash+withdrawTef;
+ $('reportSummary').innerHTML='<div class="grid"><div class="item"><b>Comandas</b><p>'+orders.length+'</p></div><div class="item"><b>Total de pedidos</b><p>'+money(total)+'</p></div><div class="item"><b>Recibido en efectivo (comandas)</b><p>'+money(cash)+'</p></div><div class="item"><b>Recibido por TEF (comandas)</b><p>'+money(tef)+'</p></div><div class="item"><b>Total recaudado (comandas)</b><p>'+money(cash+tef)+'</p></div><div class="item">Marcadas pagadas: '+counts.Pagado+'</div><div class="item">Con abono: '+counts.Abono+'</div><div class="item">Pendientes: '+counts.Pendiente+'</div><div class="item"><b>Gastos del negocio</b><p>Efectivo: '+money(expenseCash)+' · TEF: '+money(expenseTef)+'</p><b>Total: '+money(expenseCash+expenseTef)+'</b></div><div class="item"><b>Retiros personales</b><p>Efectivo: '+money(withdrawCash)+' · TEF: '+money(withdrawTef)+'</p><b>Total: '+money(withdrawCash+withdrawTef)+'</b></div><div class="item"><b>Total salidas de caja</b><p>'+money(out)+'</p></div><div class="item"><b>Saldo neto orientativo</b><p>'+money(cash+tef-out)+'</p></div></div>';
  $('reportProducts').innerHTML=products.length?products.map(p=>'<div class="item row"><span>'+safe(p.name)+' · '+p.qty+' un.</span><b>'+money(p.total)+'</b></div>').join(''):'<p class="muted">No hay productos para esta fecha.</p>';
- $('reportOrders').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><span>#'+safe(o.number)+' · '+safe(o.customer)+' · '+safe(o.payment)+'</span><b>'+money(o.total)+'</b></div><div class="muted">Efectivo: '+money((o.payments||[]).filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0))+' · TEF: '+money((o.payments||[]).filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0))+'</div></div>').join(''):'<p class="muted">No hay comandas para esta fecha.</p>';
 }
+
 let pendingCashKey=null,pendingCashSignature=null;
 const cashLocalDate=iso=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));
 $('cashType').onchange=()=>$('cashCategoryWrap').classList.toggle('hidden',$('cashType').value==='RETIRO_PERSONAL');
