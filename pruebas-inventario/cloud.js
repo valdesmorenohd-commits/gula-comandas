@@ -9,7 +9,7 @@ let db={products:[],orders:[],settings:{footer:'Gracias por preferir Gula',whats
 const fail=e=>{console.error(e);alert('No se pudo completar la operación: '+(e?.message||e))};
 function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2500)}
 function check(r){if(r.error)throw r.error;return r.data}
-function tab(t){if(!isAdmin&&['products','inventory','settings','users'].includes(t))return;document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==t));document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.tab===t);b.classList.toggle('secondary',b.dataset.tab!==t)});if(t==='history')renderHistory();if(t==='products')renderProducts();if(t==='inventory')renderInventory();if(t==='reports')renderReports();if(t==='users')renderUsers()}
+function tab(t){if(!isAdmin&&['products','inventory','settings','users'].includes(t))return;document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==t));document.querySelectorAll('nav button').forEach(b=>{b.classList.toggle('active',b.dataset.tab===t);b.classList.toggle('secondary',b.dataset.tab!==t)});if(t==='history')renderHistory();if(t==='products')renderProducts();if(t==='inventory')renderInventory();if(t==='reports')renderReports();if(t==='caja')renderCaja();if(t==='users')renderUsers()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function renderSelect(){const s=$('productSelect'),selected=s.value,q=($('productSearch')?.value||'').trim().toLocaleLowerCase('es');const found=db.products.filter(p=>p.name.toLocaleLowerCase('es').includes(q));s.innerHTML=found.map(p=>'<option value="'+safe(p.id)+'">'+safe(p.name)+'</option>').join('');if(found.some(p=>p.id===selected))s.value=selected;syncPrice()}
 $('productSearch').oninput=renderSelect;
@@ -206,6 +206,54 @@ function renderReports(){
  $('reportProducts').innerHTML=products.length?products.map(p=>'<div class="item row"><span>'+safe(p.name)+' · '+p.qty+' un.</span><b>'+money(p.total)+'</b></div>').join(''):'<p class="muted">No hay productos para esta fecha.</p>';
  $('reportOrders').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><span>#'+safe(o.number)+' · '+safe(o.customer)+' · '+safe(o.payment)+'</span><b>'+money(o.total)+'</b></div><div class="muted">Efectivo: '+money((o.payments||[]).filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0))+' · TEF: '+money((o.payments||[]).filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0))+'</div></div>').join(''):'<p class="muted">No hay comandas para esta fecha.</p>';
 }
+let pendingCashKey=null,pendingCashSignature=null;
+const cashLocalDate=iso=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));
+$('cashType').onchange=()=>$('cashCategoryWrap').classList.toggle('hidden',$('cashType').value==='RETIRO_PERSONAL');
+$('cashRefresh').onclick=renderCaja;
+$('cashDate').onchange=renderCaja;
+async function renderCaja(){
+ if(!isAdmin)return;
+ if(!$('cashDate').value)$('cashDate').value=localDate();
+ const date=$('cashDate').value;
+ try{
+  const [paymentsResult,exitsResult,usersResult]=await Promise.all([
+   api.from('gula_pagos').select('id,monto,medio,creado_en').order('creado_en',{ascending:false}).limit(5000),
+   api.from('gula_salidas_caja').select('*').order('creado_en',{ascending:false}).limit(5000),
+   api.from('gula_usuarios').select('user_id,nombre')
+  ]);
+  const payments=check(paymentsResult).filter(p=>cashLocalDate(p.creado_en)===date);
+  const exits=check(exitsResult).filter(x=>cashLocalDate(x.creado_en)===date);
+  const names=new Map(check(usersResult).map(u=>[u.user_id,u.nombre]));
+  const active=exits.filter(x=>!x.anulada_en);
+  const sum=(rows,medio)=>rows.filter(x=>x.medio===medio).reduce((n,x)=>n+Number(x.monto||0),0);
+  const cashIn=sum(payments,'EFECTIVO'),tefIn=sum(payments,'TEF'),cashOut=sum(active,'EFECTIVO'),tefOut=sum(active,'TEF');
+  const expense=active.filter(x=>x.tipo==='GASTO').reduce((n,x)=>n+x.monto,0);
+  const withdrawal=active.filter(x=>x.tipo==='RETIRO_PERSONAL').reduce((n,x)=>n+x.monto,0);
+  $('cashSummary').innerHTML='<div class="item"><b>Entradas reales del día</b><p>Efectivo: '+money(cashIn)+' · TEF: '+money(tefIn)+'</p><b>Total recibido: '+money(cashIn+tefIn)+'</b></div><div class="item"><b>Salidas del día</b><p>Efectivo: '+money(cashOut)+' · TEF: '+money(tefOut)+'</p><p>Gastos del negocio: '+money(expense)+' · Retiros personales: '+money(withdrawal)+'</p><b>Total salidas: '+money(cashOut+tefOut)+'</b></div><div class="item"><b>Movimiento neto del día</b><p>Efectivo: '+money(cashIn-cashOut)+' · TEF: '+money(tefIn-tefOut)+'</p><b>Total neto: '+money(cashIn+tefIn-cashOut-tefOut)+'</b><p class="muted">No incluye saldo inicial de caja ni otros ingresos ajenos a comandas.</p></div>';
+  $('cashOutList').innerHTML=exits.length?exits.map(x=>'<div class="item"><b>'+safe(x.tipo==='GASTO'?'Gasto':'Retiro personal')+' · '+money(x.monto)+'</b><div>'+safe(x.concepto)+'</div><div class="muted">'+safe(x.categoria)+' · '+safe(x.medio)+' · '+safe(new Date(x.creado_en).toLocaleString('es-CL',{timeZone:'America/Santiago'}))+' · '+safe(names.get(x.creado_por)||'Usuario')+'</div>'+(x.anulada_en?'<div class="muted">ANULADA · '+safe(x.motivo_anulacion||'')+'</div>':'<button class="secondary" data-cash-void="'+x.id+'">Anular salida</button>')+'</div>').join(''):'<p class="muted">No hay salidas registradas para este día.</p>';
+  document.querySelectorAll('[data-cash-void]').forEach(b=>b.onclick=async()=>{
+   const reason=prompt('Motivo de anulación (mínimo 5 caracteres):');
+   if(reason===null)return;
+   if(reason.trim().length<5)return alert('Debes indicar un motivo de al menos 5 caracteres.');
+   if(!confirm('¿Confirmas anular esta salida? El movimiento quedará registrado.'))return;
+   b.disabled=true;try{check(await api.rpc('gula_anular_salida',{p_id:b.dataset.cashVoid,p_motivo:reason.trim()}));await renderCaja()}catch(e){fail(e)}finally{b.disabled=false}
+  });
+ }catch(e){fail(e)}
+}
+$('cashSave').onclick=async()=>{
+ if(!isAdmin)return;
+ const type=$('cashType').value,category=type==='RETIRO_PERSONAL'?'RETIRO_PERSONAL':$('cashCategory').value,concept=$('cashConcept').value.trim(),amount=Number($('cashAmount').value),method=$('cashMethod').value;
+ if(!Number.isSafeInteger(amount)||amount<=0||concept.length<3)return alert('Ingresa un concepto de al menos 3 caracteres y un monto válido mayor a cero.');
+ const signature=[type,category,concept,amount,method].join('|');
+ if(pendingCashSignature!==signature){pendingCashKey=crypto.randomUUID();pendingCashSignature=signature}
+ const btn=$('cashSave');btn.disabled=true;
+ try{
+  check(await api.rpc('gula_registrar_salida',{p_tipo:type,p_categoria:category,p_concepto:concept,p_monto:amount,p_medio:method,p_clave:pendingCashKey}));
+  pendingCashKey=null;pendingCashSignature=null;
+  $('cashConcept').value='';$('cashAmount').value='';
+  await renderCaja();toast('Salida registrada en caja.');
+ }catch(e){fail(e)}finally{btn.disabled=false}
+};
 function exportReportCsv(){
  if(!isAdmin)return;
  const orders=ordersForReport();
