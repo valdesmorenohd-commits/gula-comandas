@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gula — pruebas de integración sin Supabase</title>
+<style>body{font:16px system-ui;margin:2rem auto;padding:0 1rem;max-width:780px;background:#faf9f6;color:#222}h1{font-size:1.6rem}.ok{color:#176b3b}.bad{color:#a40000}li{margin:.6rem 0}code{background:#eee;padding:.15rem .3rem}small{color:#666}</style>
+</head><body><h1>Pruebas del adaptador Gula</h1><p>Pruebas locales con Supabase simulado. No conectan a una base de datos ni realizan ventas.</p><ol id="results"></ol><p id="summary"></p>
+<script src="./gula-rpc-adapter.js"></script>
+<script>
+(async()=>{
+const list=document.querySelector('#results'), summary=document.querySelector('#summary');
+const uuid='11111111-1111-4111-8111-111111111111',orderId='22222222-2222-4222-8222-222222222222';
+let count=0,passed=0;
+async function test(name,fn){count++;try{await fn();passed++;list.insertAdjacentHTML('beforeend','<li class="ok">✓ '+name+'</li>')}catch(e){list.insertAdjacentHTML('beforeend','<li class="bad">✗ '+name+': '+String(e.message).replaceAll('<','&lt;')+'</li>')}}
+function assert(v,msg){if(!v)throw Error(msg||'Resultado incorrecto')}
+async function rejects(fn){let thrown=false;try{await fn()}catch(e){thrown=true}assert(thrown,'Se esperaba un rechazo')}
+const calls=[],client={rpc:async(name,args)=>{calls.push({name,args});return {data:{ok:true},error:null}}};
+const order={customer:'Prueba',phone:'',deliveryIso:'2026-11-14T13:00:00-03:00',deliveryType:'Retiro',notes:'',items:[{product_id:uuid,qty:2,note:''}]};
+await test('El adaptador no se habilita por accidente',()=>rejects(()=>GulaStagingAdapter.makeAdapter(client)));
+const api=GulaStagingAdapter.makeAdapter(client,true);
+await test('Crear utiliza RPC, clave de idempotencia y product_id',async()=>{await api.crear(order,orderId);const c=calls.at(-1);assert(c.name==='gula_crear_comanda_segura');assert(c.args.p_clave===orderId);assert(c.args.p_items[0].product_id===uuid)});
+await test('No acepta productos sin ID',()=>rejects(()=>api.crear({...order,items:[{name:'Brownie',qty:2}]},orderId)));
+await test('No acepta cantidades negativas',()=>rejects(()=>api.crear({...order,items:[{product_id:uuid,qty:-2}]},orderId)));
+await test('No acepta productos repetidos',()=>rejects(()=>api.crear({...order,items:[order.items[0],order.items[0]]},orderId)));
+await test('Editar utiliza RPC y conserva ID',async()=>{await api.editar({...order,id:orderId});assert(calls.at(-1).name==='gula_editar_comanda_segura')});
+await test('Cancelar utiliza RPC',async()=>{await api.cancelar(orderId);assert(calls.at(-1).name==='gula_cancelar_comanda_segura')});
+await test('Abono valida medio de pago',()=>rejects(()=>api.abonar(orderId,1000,'TARJETA',uuid)));
+await test('Abono valida monto',()=>rejects(()=>api.abonar(orderId,0,'EFECTIVO',uuid)));
+await test('Abono válido utiliza RPC',async()=>{await api.abonar(orderId,1000,'TEF',uuid);assert(calls.at(-1).args.p_medio==='TEF')});
+await test('Ajuste stock válido utiliza RPC',async()=>{await api.ajustarStock(uuid,null,-2,orderId);assert(calls.at(-1).name==='gula_ajustar_stock')});
+await test('Error de Supabase se propaga',async()=>{const bad=GulaStagingAdapter.makeAdapter({rpc:async()=>({data:null,error:{message:'Sin conexión'}})},true);await rejects(()=>bad.cancelar(orderId))});
+summary.textContent=passed+' de '+count+' pruebas aprobadas. Estas pruebas no verifican RLS, concurrencia, SQL ni el estado real de Supabase.';
+})();
+</script></body></html>
