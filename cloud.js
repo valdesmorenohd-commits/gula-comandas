@@ -105,6 +105,25 @@ function exportReportCsv(){if(!isAdmin)return;const orders=ordersForReport(),dat
 
 $('search').oninput=renderHistory;
 function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i},product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();tab('new');window.scrollTo(0,0)}
+let pendingInitialKey=null,pendingInitialSignature=null;
+$('stockInitialSave').onclick=async()=>{
+ if(!isAdmin)return;
+ const id=$('stockInitialProduct').value,qty=Number($('stockInitialQty').value),p=db.products.find(x=>x.id===id);
+ if(!p||!p.controlaStock||!Number.isSafeInteger(qty)||qty<0||!$('stockInitialQty').value.trim())return alert('Selecciona un producto e ingresa una cantidad inicial válida.');
+ const date=p.categoria==='MENU_FINDE'?$('stockDate').value:null;
+ if(p.categoria==='MENU_FINDE'&&!date)return alert('Selecciona la fecha del menú.');
+ const signature=[id,date||'',qty].join(':');
+ if(pendingInitialSignature!==signature){pendingInitialKey=crypto.randomUUID();pendingInitialSignature=signature;}
+ const btn=$('stockInitialSave');btn.disabled=true;
+ try{
+  const result=await api.rpc('gula_configurar_stock_inicial',{p_producto_id:id,p_fecha:date,p_cantidad:qty,p_clave:pendingInitialKey});
+  const data=check(result);
+  pendingInitialKey=null;pendingInitialSignature=null;
+  $('stockInitialQty').value='';
+  $('stockInitialStatus').textContent='Stock inicial configurado: '+data.disponible+' unidades.';
+  await renderInventory();toast('Stock inicial guardado.');
+ }catch(e){fail(e)}finally{btn.disabled=false}
+};
 let pendingStockKey=null,pendingStockSignature=null;
 async function renderInventory(){
  if(!isAdmin||!$('stockList'))return;
@@ -121,6 +140,9 @@ async function renderInventory(){
   const select=$('stockProduct'),selected=select.value;
   select.innerHTML=products.map(p=>'<option value="'+safe(p.id)+'">'+safe(p.name)+'</option>').join('');
   if(products.some(p=>p.id===selected))select.value=selected;
+  const initialSelect=$('stockInitialProduct'),initialSelected=initialSelect.value;
+  initialSelect.innerHTML=products.map(p=>'<option value="'+safe(p.id)+'">'+safe(p.name)+'</option>').join('');
+  if(products.some(p=>p.id===initialSelected))initialSelect.value=initialSelected;
   $('stockList').innerHTML=products.length?products.map(p=>{
    const isMenu=p.categoria==='MENU_FINDE';
    const available=(isMenu?diarioMap:generalMap).get(p.id);
