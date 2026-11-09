@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gula · Diagnóstico de Supabase de pruebas</title>
+<style>body{font:16px system-ui;background:#f8f7f4;color:#222;max-width:720px;margin:25px auto;padding:0 18px}input,button{font:inherit;padding:12px;border-radius:8px}input{width:100%;box-sizing:border-box;margin:6px 0 14px;border:1px solid #bbb}button{border:0;background:#222;color:white;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eee;padding:15px;border-radius:8px}.warning{border-left:4px solid #b50;padding:10px;background:#fff4d9}small{color:#666}</style>
+</head><body><h1>Gula · Diagnóstico aislado</h1>
+<p>Esta página sirve para comprobar la conexión con un <b>proyecto Supabase de pruebas independiente</b>. No crea, edita ni elimina pedidos.</p>
+<p class="warning"><b>No ingreses claves secretas ni service_role.</b> Usa exclusivamente la clave pública/publishable del proyecto de pruebas. Nunca uses el proyecto actual de Gula.</p>
+<label>URL de Supabase de pruebas</label><input id="url" type="url" placeholder="https://proyecto-de-pruebas.supabase.co" autocomplete="off">
+<label>Clave pública (publishable o anon) de pruebas</label><input id="key" type="password" placeholder="sb_publishable_... o anon JWT" autocomplete="off">
+<button id="run">Comprobar conexión (solo lectura)</button>
+<pre id="out" aria-live="polite">Sin ejecutar.</pre>
+<small>Los datos no se guardan en el navegador ni se envían a otros servidores. Se envían únicamente al proyecto Supabase indicado para hacer las consultas. No se muestran registros de clientes.</small>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+$('run').onclick=async()=>{
+ $('out').textContent='Comprobando…';
+ const raw=$('url').value.trim(),key=$('key').value.trim();
+ let parsed;
+ try{parsed=new URL(raw)}catch{ $('out').textContent='URL inválida.';return }
+ if(parsed.protocol!=='https:'||!/^([a-z0-9-]+)\.supabase\.co$/i.test(parsed.hostname)||
+ parsed.hostname==='yobauucfbpdsrmrjjdhy.supabase.co'){
+  $('out').textContent='Proyecto rechazado. Usa exclusivamente un proyecto Supabase de pruebas diferente al de producción.';return;
+ }
+ if(!key||/service.role|secret/i.test(key)){ $('out').textContent='Introduce solo una clave pública de pruebas.';return }
+ $('run').disabled=true;
+ try{
+  const client=window.supabase.createClient(parsed.origin,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+  const names=['gula_productos','gula_comandas','gula_stock_general','gula_stock_diario','gula_pagos','gula_movimientos_stock','gula_operaciones_comanda'];
+  const lines=['Proyecto: '+parsed.hostname,'Prueba de acceso público de solo lectura:'];
+  for(const name of names){
+   const {error}=await client.from(name).select('*',{head:true,count:'exact'}).limit(0);
+   if(!error)lines.push('✓ '+name+': lectura permitida (revisar si es apropiado para esta tabla)');
+   else if(error.code==='42501'||/permission denied|row-level security/i.test(error.message||''))lines.push('🔒 '+name+': acceso denegado por permisos');
+   else lines.push('• '+name+': '+(error.code||'error')+' — '+(error.message||'sin detalle'));
+  }
+  lines.push('Nota: esta prueba NO verifica funciones RPC, seguridad RLS completa ni reservas concurrentes.');
+  $('out').textContent=lines.join('\n');
+ }catch(e){$('out').textContent='Error de conexión: '+(e.message||String(e))}
+ finally{$('run').disabled=false;$('key').value=''}
+};
+</script></body></html>
