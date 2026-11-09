@@ -1,5 +1,5 @@
 'use strict';
-const URL_SB='https://yobauucfbpdsrmrjjdhy.supabase.co',KEY_SB='sb_publishable_sA83XTnm6i9rW3zrQC26CA_CbwFw_xU';
+const URL_SB='https://cesvcjccnpzeplfyrvbm.supabase.co',KEY_SB='sb_publishable_SmM4au0Qm9tI2aynSd88KQ_X9yFLmtN';
 const api=window.supabase.createClient(URL_SB,KEY_SB,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id),money=n=>'$'+Math.round(Number(n)||0).toLocaleString('es-CL');
 const uid=()=>crypto.randomUUID(),safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','"':'&quot;',"'":'&#39;'}[c]));
@@ -25,7 +25,7 @@ function toDelivery(date,time){const naive=new Date(date+'T'+time+':00Z');const 
 async function refresh(){const [p,o,c]=await Promise.all([api.from('gula_productos').select('*').eq('activo',true).order('nombre'),api.from('gula_comandas').select('*').order('numero',{ascending:false}).limit(1000),api.from('gula_configuracion').select('*').eq('clave','general').maybeSingle()]);db.products=check(p).map(x=>({id:x.id,name:x.nombre,price:x.precio}));db.orders=check(o).map(fromOrder);db.settings={footer:'Gracias por preferir Gula',whatsapp:'+56 9 3306 8109',logo:'',...(check(c)?.valor||{})};renderSelect();renderHistory();renderProducts();renderReports();loadSettings()}
 // Migración de comandas: apagada hasta configurar un Supabase aislado.
 // Este interruptor NO debe activarse mientras las RPC no estén auditadas.
-const GULA_STAGING_RPC_ENABLED=false;
+const GULA_STAGING_RPC_ENABLED=true;
 let gulaPendingOperation=null;
 function gulaRpcItems(items){
  if(!items.length)throw Error('Agrega productos a la comanda.');
@@ -67,11 +67,11 @@ $('save').onclick=saveOrder;$('savePrint').onclick=async()=>{const o=await saveO
 function renderHistory(){
  const q=$('search').value.toLowerCase();
  const orders=db.orders.filter(o=>o.customer.toLowerCase().includes(q)||String(o.number).includes(q));
- $('historyList').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><div><b>#'+o.number+' · '+safe(o.customer)+'</b><div class="muted">Entrega: '+safe(o.date)+' '+safe(o.time)+' · '+safe(o.payment)+'</div><b>'+money(o.total)+'</b></div></div><div class="actions">'+(isAdmin?'<button class="secondary" data-edit="'+o.id+'">Editar</button>':'')+'<button data-pdf="'+o.id+'">Compartir / Imprimir</button><button class="secondary" data-download="'+o.id+'">Descargar PDF</button>'+(isAdmin?'<button class="danger" data-delete="'+o.id+'">Eliminar</button>':'')+'</div></div>').join(''):'<p class="muted">No hay pedidos guardados.</p>';
+ $('historyList').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><div><b>#'+o.number+' · '+safe(o.customer)+'</b><div class="muted">Entrega: '+safe(o.date)+' '+safe(o.time)+' · '+safe(o.payment)+'</div><b>'+money(o.total)+'</b></div></div><div class="actions">'+(isAdmin?'<button class="secondary" data-edit="'+o.id+'">Editar</button>':'')+'<button data-pdf="'+o.id+'">Compartir / Imprimir</button><button class="secondary" data-download="'+o.id+'">Descargar PDF</button>'+(isAdmin&&!o.cancelada?'<button class="danger" data-delete="'+o.id+'">Cancelar</button>':'')+'</div></div>').join(''):'<p class="muted">No hay pedidos guardados.</p>';
  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editOrder(b.dataset.edit));
  document.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>makePDF(db.orders.find(o=>o.id===b.dataset.pdf)));
  document.querySelectorAll('[data-download]').forEach(b=>b.onclick=()=>makePDF(db.orders.find(o=>o.id===b.dataset.download),'download'));
- document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!isAdmin)return;if(!confirm('¿Eliminar esta comanda definitivamente?'))return;try{check(await api.from('gula_comandas').delete().eq('id',b.dataset.delete).select());await refresh()}catch(e){fail(e)}});
+ document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!isAdmin)return;if(!confirm('¿Cancelar esta comanda? Se devolverá el stock reservado. No se puede cancelar si tiene pagos.'))return;try{const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);await adapter.cancelar(b.dataset.delete);await refresh();toast('Comanda cancelada; stock restituido.')}catch(e){fail(e)}});
 }
 
 function ordersForReport(){const d=$('reportDate')?.value;return db.orders.filter(o=>o.date===d)}
