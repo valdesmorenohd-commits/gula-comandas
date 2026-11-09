@@ -207,14 +207,16 @@ $('stockAdjust').onclick=async()=>{
  if(!p||!p.controlaStock||!Number.isSafeInteger(delta)||delta===0)return alert('Selecciona un producto y una variación válida.');
  const date=p.categoria==='MENU_FINDE'?$('stockDate').value:null;
  if(p.categoria==='MENU_FINDE'&&!date)return alert('Selecciona la fecha del menú.');
- const signature=[id,date||'',delta].join(':');
+ const reason=$('stockReason').value;
+ if(!reason)return alert('Selecciona un motivo del ajuste.');
+ const signature=[id,date||'',delta,reason].join(':');
  if(pendingStockSignature!==signature){pendingStockKey=crypto.randomUUID();pendingStockSignature=signature;}
  const btn=$('stockAdjust');btn.disabled=true;
  try{
   const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);
-  const result=await adapter.ajustarStock(id,date,delta,pendingStockKey);
+  const result=await adapter.ajustarStock(id,date,delta,pendingStockKey,reason);
   pendingStockKey=null;pendingStockSignature=null;
-  $('stockDelta').value='';
+  $('stockDelta').value='';$('stockReason').value='';
   $('stockStatus').textContent='Existencias actualizadas: '+result.disponible+' unidades.';
   await renderInventory();toast('Inventario actualizado.');
  }catch(e){fail(e)}finally{btn.disabled=false}
