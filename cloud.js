@@ -78,6 +78,7 @@ function renderHistory(){
 }
 
 let pendingAbonoKey=null;
+let pendingAbonoSignature=null;
 $('abonoSave').onclick=async()=>{
  if(!authorized)return;
  const id=$('abonoOrder').value,monto=Number($('abonoAmount').value),medio=$('abonoMethod').value;
@@ -87,9 +88,10 @@ $('abonoSave').onclick=async()=>{
  const btn=$('abonoSave');btn.disabled=true;
  try{
   const adapter=window.GulaStagingAdapter.makeAdapter(api,GULA_STAGING_RPC_ENABLED);
-  if(!pendingAbonoKey)pendingAbonoKey=crypto.randomUUID();
+  const signature=[id,monto,medio].join(':');
+  if(pendingAbonoSignature!==signature){pendingAbonoKey=crypto.randomUUID();pendingAbonoSignature=signature;}
   const result=await adapter.abonar(id,monto,medio,pendingAbonoKey);
-  pendingAbonoKey=null;
+  pendingAbonoKey=null;pendingAbonoSignature=null;
   $('abonoStatus').textContent='Abonado: '+money(result.abonado)+' · Saldo: '+money(result.saldo);
   $('abonoAmount').value='';
   await refresh();
