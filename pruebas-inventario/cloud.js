@@ -80,6 +80,24 @@ function initialPaymentRequest(){
   throw Error('El abono debe ser mayor que $0 y menor que el total de la comanda.');
  return {amount,method:$('initialPaymentMethod').value};
 }
+async function describeStockFailure(){
+ const items=gulaRpcItems(cart),byId=new Map();
+ for(const item of items)byId.set(item.product_id,(byId.get(item.product_id)||0)+item.qty);
+ const date=$('deliveryDate').value;
+ for(const [id,qty] of byId){
+  const p=db.products.find(x=>x.id===id);
+  if(!p?.controlaStock)continue;
+  const isMenu=p.categoria==='MENU_FINDE';
+  if(isMenu&&!date)return 'Selecciona una fecha de entrega para comprobar el stock del menú.';
+  const query=isMenu?api.from('gula_stock_diario').select('disponible').eq('producto_id',id).eq('fecha',date).maybeSingle():api.from('gula_stock_general').select('disponible').eq('producto_id',id).maybeSingle();
+  const row=check(await query);
+  if(!row)return 'Stock sin configurar para '+p.name+(isMenu?' el '+date:'')+'. Ingresa el stock inicial en Inventario.';
+  const available=Number(row.disponible);
+  if(available===0)return 'Producto agotado: '+p.name+'. Stock disponible: 0 unidades.';
+  if(available<qty)return 'Stock insuficiente para '+p.name+'. Disponible: '+available+' '+(available===1?'unidad':'unidades')+'. Solicitado: '+qty+'.';
+ }
+ return null;
+}
 async function saveOrder(){
  if(!authorized)return null;
  if(editing&&!isAdmin){alert('Solo el administrador puede editar comandas');return null}
@@ -110,6 +128,7 @@ async function saveOrder(){
   return order;
  }catch(e){
   if(pendingCreatedOrderId)alert('La comanda pudo haberse creado. No crees otra: revisa el Historial y verifica el pago antes de reintentar.');
+  if(/stock insuficiente|stock no configurado|stock agotado/i.test(String(e?.message||''))){try{const detail=await describeStockFailure();if(detail){alert(detail);return null}}catch(diagnosticError){console.warn('No se pudo consultar el detalle del stock',diagnosticError)}}
   fail(e);return null;
  }finally{btn.disabled=false;printBtn.disabled=false}
 }
