@@ -24,6 +24,7 @@ $('addItem').onclick=async()=>{
  const p=db.products.find(p=>p.id===$('productSelect').value),qty=Number($('qty').value),price=Number($('unitPrice').value);
  if(!p||!Number.isInteger(qty)||qty<1||!Number.isInteger(price)||price<0)return alert('Revisa cantidad y precio.');
  btn.disabled=true;
+ let stockNotice=null;
  try{
   if(p.controlaStock){
    const requested=qty+cart.filter(i=>i.product_id===p.id).reduce((sum,i)=>sum+i.qty,0);
@@ -36,9 +37,11 @@ $('addItem').onclick=async()=>{
    const available=Number(row.disponible);
    if(available===0)return alert('Producto agotado: '+p.name+'. Stock disponible: 0 unidades.');
    if(available<requested)return alert('Stock insuficiente para '+p.name+'. Disponible: '+available+' '+(available===1?'unidad':'unidades')+'. Solicitado: '+requested+'.');
+   stockNotice='Producto: '+p.name+'\\nStock disponible: '+available+' unidades\\nAgregadas ahora: '+qty+' unidades'+(requested>qty?'\\nTotal en este pedido: '+requested+' unidades':'')+'\\nQuedarían disponibles: '+(available-requested)+' unidades\\n\\nEl stock se descontará al guardar la comanda.';
   }
   cart.push({product_id:p.id,name:p.name,qty,price,note:$('itemNote').value.trim()});
   $('qty').value=1;$('itemNote').value='';renderCart();
+  if(stockNotice)alert(stockNotice.replaceAll('\\n','\n'));
  }catch(e){fail(e)}finally{btn.disabled=false}
 };
 function clearForm(){if($('productSearch'))$('productSearch').value='';editing=null;['customer','phone','notes'].forEach(k=>$(k).value='');$('deliveryDate').value=localDate();$('deliveryTime').value='13:00';$('deliveryType').value='Retiro';$('payment').value='Pendiente';cart=[];$('initialPaymentAmount').value='';$('initialPaymentMethod').value='EFECTIVO';$('formTitle').textContent='Nueva comanda';renderCart();updateInitialPaymentUI()}
