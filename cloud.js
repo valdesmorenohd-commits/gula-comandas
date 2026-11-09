@@ -41,6 +41,7 @@ function gulaRpcItems(items){
 }
 async function gulaSaveViaRpc(customer,date,time){
  if(!GULA_STAGING_RPC_ENABLED)throw Error('Migración no habilitada.');
+ if(new URL(URL_SB).hostname==='yobauucfbpdsrmrjjdhy.supabase.co')throw Error('Bloqueado: las RPC de pruebas no pueden usarse con Supabase de producción.');
  if(!window.GulaStagingAdapter)throw Error('Falta cargar el adaptador RPC.');
  const adapter=window.GulaStagingAdapter.makeAdapter(api,true);
  const order={
