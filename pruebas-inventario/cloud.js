@@ -19,7 +19,7 @@ function syncPrice(){const p=db.products.find(p=>p.id===$('productSelect').value
 $('productSelect').onchange=syncPrice;
 function renderCart(){$('cart').innerHTML=cart.map((i,k)=>'<div class="item"><div class="row"><div><b>'+safe(i.qty)+' × '+safe(i.name)+'</b><div class="muted">'+money(i.price)+' c/u '+safe(i.note)+'</div></div><div><b>'+money(i.qty*i.price)+'</b><br><button class="danger" data-remove="'+k+'">Quitar</button></div></div></div>').join('');$('total').textContent=money(cart.reduce((s,i)=>s+i.qty*i.price,0));document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{cart.splice(Number(b.dataset.remove),1);renderCart()})}
 $('addItem').onclick=()=>{const p=db.products.find(p=>p.id===$('productSelect').value),qty=Number($('qty').value),price=Number($('unitPrice').value);if(!p||!Number.isInteger(qty)||qty<1||!Number.isInteger(price)||price<0)return alert('Revisa cantidad y precio.');cart.push({product_id:p.id,name:p.name,qty,price,note:$('itemNote').value.trim()});$('qty').value=1;$('itemNote').value='';renderCart()};
-function clearForm(){if($('productSearch'))$('productSearch').value='';editing=null;['customer','phone','notes'].forEach(k=>$(k).value='');$('deliveryDate').value=localDate();$('deliveryTime').value='13:00';$('deliveryType').value='Retiro';$('payment').value='Pendiente';cart=[];$('formTitle').textContent='Nueva comanda';renderCart()}
+function clearForm(){if($('productSearch'))$('productSearch').value='';editing=null;['customer','phone','notes'].forEach(k=>$(k).value='');$('deliveryDate').value=localDate();$('deliveryTime').value='13:00';$('deliveryType').value='Retiro';$('payment').value='Pendiente';cart=[];$('initialPaymentAmount').value='';$('initialPaymentMethod').value='EFECTIVO';$('formTitle').textContent='Nueva comanda';renderCart();updateInitialPaymentUI()}
 function fromOrder(o){const dt=o.fecha_entrega?new Date(o.fecha_entrega):null;const date=dt?new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(dt):'';const time=dt?new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(dt):'';return {id:o.id,number:o.numero,customer:o.cliente,phone:o.telefono,date,time,deliveryType:o.tipo_entrega,payment:o.estado_pago,notes:o.notas,items:o.items,total:o.total,cancelada:!!o.cancelada,created:o.creado_en}}
 function toDelivery(date,time){const naive=new Date(date+'T'+time+':00Z');const f=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit'});const parts=Object.fromEntries(f.formatToParts(naive).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));const asUTC=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute);return new Date(naive.getTime()+(naive.getTime()-asUTC)).toISOString()}
 async function refresh(){const [p,o,c]=await Promise.all([api.from('gula_productos').select('*').eq('activo',true).order('nombre'),api.from('gula_comandas').select('*').order('numero',{ascending:false}).limit(1000),api.from('gula_configuracion').select('*').eq('clave','general').maybeSingle()]);db.products=check(p).map(x=>({id:x.id,name:x.nombre,price:x.precio,categoria:x.categoria,controlaStock:!!x.controla_stock}));db.orders=check(o).map(fromOrder);db.settings={footer:'Gracias por preferir Gula',whatsapp:'+56 9 3306 8109',logo:'',...(check(c)?.valor||{})};renderSelect();renderHistory();renderProducts();renderReports();loadSettings()}
@@ -50,8 +50,7 @@ async function gulaSaveViaRpc(customer,date,time){
   notes:$('notes').value.trim(),items:gulaRpcItems(cart)
  };
  // No guardar estado de pago desde un selector: solo se deriva de abonos reales.
- if(!editing&&$('payment').value!=='Pendiente')
-  throw Error('Los pedidos nuevos deben comenzar pendientes. Registra pagos mediante abonos.');
+ // El estado se deriva exclusivamente del pago real registrado por RPC.
  if(editing&&db.orders.find(o=>o.id===editing)?.payment!=='Pendiente')
   throw Error('No se puede editar una comanda con abonos o pagos.');
  if(editing){
@@ -64,7 +63,56 @@ async function gulaSaveViaRpc(customer,date,time){
  gulaPendingOperation=null;
  return result.comanda_id;
 }
-async function saveOrder(){if(!authorized)return null;if(editing&&!isAdmin){alert('Solo el administrador puede editar comandas');return null}const customer=$('customer').value.trim(),date=$('deliveryDate').value,time=$('deliveryTime').value;if(!customer||!date||!time||!cart.length){alert('Completa cliente, fecha, hora y agrega al menos un producto.');return null}const payload={cliente:customer,telefono:$('phone').value.trim(),fecha_entrega:toDelivery(date,time),tipo_entrega:$('deliveryType').value,estado_pago:$('payment').value,notas:$('notes').value.trim(),items:cart.map(i=>({...i})),total:cart.reduce((s,i)=>s+i.qty*i.price,0),actualizado_en:new Date().toISOString()};try{if(GULA_STAGING_RPC_ENABLED){const id=await gulaSaveViaRpc(customer,date,time);const rr=await api.from('gula_comandas').select('*').eq('id',id).single();const order=fromOrder(check(rr));clearForm();toast('Comanda N.º '+order.number+' guardada con RPC de pruebas.');await refresh();return order;}const r=editing?await api.from('gula_comandas').update(payload).eq('id',editing).select().single():await api.from('gula_comandas').insert(payload).select().single();const order=fromOrder(check(r));clearForm();toast('Comanda N.º '+order.number+' guardada. Formulario listo para una nueva.');try{await refresh()}catch(refreshError){console.error('Comanda guardada; falló actualización de pantalla',refreshError);alert('La comanda se guardó, pero no se pudo actualizar el historial. Revisa tu conexión antes de volver a guardarla.')}return order}catch(e){fail(e);return null}}
+let pendingCreatedOrderId=null,pendingCreatedPaymentKey=null,pendingCreatedPaymentSignature=null;
+function updateInitialPaymentUI(){
+ const state=$('payment').value,editingOrder=!!editing;
+ $('initialPaymentFields').classList.toggle('hidden',state==='Pendiente'||editingOrder);
+ $('initialPaymentAmountWrap').classList.toggle('hidden',state!=='Abono');
+ $('payment').disabled=editingOrder;
+}
+$('payment').onchange=updateInitialPaymentUI;
+function initialPaymentRequest(){
+ const state=$('payment').value;
+ if(state==='Pendiente')return null;
+ const total=cart.reduce((sum,item)=>sum+item.qty*item.price,0);
+ const amount=state==='Pagado'?total:Number($('initialPaymentAmount').value);
+ if(!Number.isSafeInteger(amount)||amount<=0||amount>total||(state==='Abono'&&amount>=total))
+  throw Error('El abono debe ser mayor que $0 y menor que el total de la comanda.');
+ return {amount,method:$('initialPaymentMethod').value};
+}
+async function saveOrder(){
+ if(!authorized)return null;
+ if(editing&&!isAdmin){alert('Solo el administrador puede editar comandas');return null}
+ const customer=$('customer').value.trim(),date=$('deliveryDate').value,time=$('deliveryTime').value;
+ if(!customer||!date||!time||!cart.length){alert('Completa cliente, fecha, hora y agrega al menos un producto.');return null}
+ const btn=$('save'),printBtn=$('savePrint');
+ if(btn.disabled||printBtn.disabled)return null;
+ btn.disabled=true;printBtn.disabled=true;
+ try{
+  const payment=editing?null:initialPaymentRequest();
+  const payload={cliente:customer,telefono:$('phone').value.trim(),fecha_entrega:toDelivery(date,time),tipo_entrega:$('deliveryType').value,estado_pago:'Pendiente',notas:$('notes').value.trim(),items:cart.map(i=>({...i})),total:cart.reduce((sum,i)=>sum+i.qty*i.price,0),actualizado_en:new Date().toISOString()};
+  if(!GULA_STAGING_RPC_ENABLED)throw Error('Los pagos requieren las RPC de pruebas habilitadas.');
+  let id=pendingCreatedOrderId;
+  if(!id)id=await gulaSaveViaRpc(customer,date,time);
+  if(!editing)pendingCreatedOrderId=id;
+  if(payment){
+   const signature=[id,payment.amount,payment.method].join(':');
+   if(pendingCreatedPaymentSignature!==signature){pendingCreatedPaymentKey=crypto.randomUUID();pendingCreatedPaymentSignature=signature}
+   const adapter=window.GulaStagingAdapter.makeAdapter(api,true);
+   await adapter.abonar(id,payment.amount,payment.method,pendingCreatedPaymentKey);
+  }
+  const rr=await api.from('gula_comandas').select('*').eq('id',id).single();
+  const order=fromOrder(check(rr));
+  pendingCreatedOrderId=null;pendingCreatedPaymentKey=null;pendingCreatedPaymentSignature=null;
+  clearForm();
+  await refresh();
+  toast('Comanda N.º '+order.number+' guardada'+(payment?' con pago '+payment.method:'')+'.');
+  return order;
+ }catch(e){
+  if(pendingCreatedOrderId)alert('La comanda pudo haberse creado. No crees otra: revisa el Historial y verifica el pago antes de reintentar.');
+  fail(e);return null;
+ }finally{btn.disabled=false;printBtn.disabled=false}
+}
 $('save').onclick=saveOrder;$('savePrint').onclick=async()=>{const o=await saveOrder();if(o)await makePDF(o)};$('clear').onclick=clearForm;
 function renderHistory(){
  const q=$('search').value.toLowerCase();
@@ -104,7 +152,7 @@ function renderReports(){if(!isAdmin||!$('reportSummary'))return;const orders=or
 function exportReportCsv(){if(!isAdmin)return;const orders=ordersForReport(),data=[['Comanda','Cliente','Fecha entrega','Estado histórico','Total pedido'],...orders.map(o=>[o.number,o.customer,o.date,o.payment,o.total])];const csv=String.fromCharCode(65279)+data.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join(String.fromCharCode(13,10));download(new Blob([csv],{type:'text/csv;charset=utf-8'}),'Gula-reporte-'+$('reportDate').value+'.csv')}
 
 $('search').oninput=renderHistory;
-function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i,product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();tab('new');window.scrollTo(0,0)}
+function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i,product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();updateInitialPaymentUI();tab('new');window.scrollTo(0,0)}
 let pendingInitialKey=null,pendingInitialSignature=null;
 $('stockInitialSave').onclick=async()=>{
  if(!isAdmin)return;
