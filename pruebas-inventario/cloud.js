@@ -193,8 +193,26 @@ $('abonoSave').onclick=async()=>{
 };
 function ordersForReport(){const d=$('reportDate')?.value;return db.orders.filter(o=>o.date===d&&!o.cancelada)}
 function productSummary(orders){const products=new Map();for(const o of orders)for(const i of o.items||[]){const key=i.name||'Sin nombre',entry=products.get(key)||{name:key,qty:0,total:0};entry.qty+=Number(i.qty)||0;entry.total+=(Number(i.qty)||0)*(Number(i.price)||0);products.set(key,entry)}return [...products.values()].sort((a,b)=>b.total-a.total)}
-function renderReports(){if(!isAdmin||!$('reportSummary'))return;const orders=ordersForReport(),products=productSummary(orders),total=orders.reduce((s,o)=>s+(Number(o.total)||0),0),counts={Pagado:0,Abono:0,Pendiente:0};for(const o of orders)counts[o.payment]=(counts[o.payment]||0)+1;$('reportSummary').innerHTML='<div class="grid"><div class="item"><b>Comandas</b><p>'+orders.length+'</p></div><div class="item"><b>Total de pedidos</b><p>'+money(total)+'</p></div><div class="item">Marcadas pagadas: '+counts.Pagado+'</div><div class="item">Con abono: '+counts.Abono+'</div><div class="item">Pendientes: '+counts.Pendiente+'</div></div>';$('reportProducts').innerHTML=products.length?products.map(p=>'<div class="item row"><span>'+safe(p.name)+' · '+p.qty+' un.</span><b>'+money(p.total)+'</b></div>').join(''):'<p class="muted">No hay productos para esta fecha.</p>';$('reportOrders').innerHTML=orders.length?orders.map(o=>'<div class="item row"><span>#'+safe(o.number)+' · '+safe(o.customer)+' · '+safe(o.payment)+'</span><b>'+money(o.total)+'</b></div>').join(''):'<p class="muted">No hay comandas para esta fecha.</p>'}
-function exportReportCsv(){if(!isAdmin)return;const orders=ordersForReport(),data=[['Comanda','Cliente','Fecha entrega','Estado histórico','Total pedido'],...orders.map(o=>[o.number,o.customer,o.date,o.payment,o.total])];const csv=String.fromCharCode(65279)+data.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join(String.fromCharCode(13,10));download(new Blob([csv],{type:'text/csv;charset=utf-8'}),'Gula-reporte-'+$('reportDate').value+'.csv')}
+function reportPayments(orders){return orders.flatMap(o=>(o.payments||[]).map(p=>({...p,orderNumber:o.number})))}
+function renderReports(){
+ if(!isAdmin||!$('reportSummary'))return;
+ const orders=ordersForReport(),products=productSummary(orders),total=orders.reduce((s,o)=>s+(Number(o.total)||0),0),counts={Pagado:0,Abono:0,Pendiente:0};
+ for(const o of orders)counts[o.payment]=(counts[o.payment]||0)+1;
+ const payments=reportPayments(orders);
+ const cash=payments.filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0);
+ const tef=payments.filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0);
+ const received=cash+tef;
+ $('reportSummary').innerHTML='<div class="grid"><div class="item"><b>Comandas</b><p>'+orders.length+'</p></div><div class="item"><b>Total de pedidos</b><p>'+money(total)+'</p></div><div class="item"><b>Recibido en efectivo</b><p>'+money(cash)+'</p></div><div class="item"><b>Recibido por TEF</b><p>'+money(tef)+'</p></div><div class="item"><b>Total recaudado</b><p>'+money(received)+'</p></div><div class="item">Marcadas pagadas: '+counts.Pagado+'</div><div class="item">Con abono: '+counts.Abono+'</div><div class="item">Pendientes: '+counts.Pendiente+'</div></div>';
+ $('reportProducts').innerHTML=products.length?products.map(p=>'<div class="item row"><span>'+safe(p.name)+' · '+p.qty+' un.</span><b>'+money(p.total)+'</b></div>').join(''):'<p class="muted">No hay productos para esta fecha.</p>';
+ $('reportOrders').innerHTML=orders.length?orders.map(o=>'<div class="item"><div class="row"><span>#'+safe(o.number)+' · '+safe(o.customer)+' · '+safe(o.payment)+'</span><b>'+money(o.total)+'</b></div><div class="muted">Efectivo: '+money((o.payments||[]).filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0))+' · TEF: '+money((o.payments||[]).filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0))+'</div></div>').join(''):'<p class="muted">No hay comandas para esta fecha.</p>';
+}
+function exportReportCsv(){
+ if(!isAdmin)return;
+ const orders=ordersForReport();
+ const data=[['Comanda','Cliente','Fecha entrega','Estado','Total pedido','Recibido efectivo','Recibido TEF','Total recibido','Saldo'],...orders.map(o=>{const payments=o.payments||[],cash=payments.filter(p=>p.medio==='EFECTIVO').reduce((n,p)=>n+Number(p.monto||0),0),tef=payments.filter(p=>p.medio==='TEF').reduce((n,p)=>n+Number(p.monto||0),0);return [o.number,o.customer,o.date,o.payment,o.total,cash,tef,cash+tef,Math.max(0,o.total-cash-tef)]})];
+ const csv=String.fromCharCode(65279)+data.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join(String.fromCharCode(13,10));
+ download(new Blob([csv],{type:'text/csv;charset=utf-8'}),'Gula-reporte-'+$('reportDate').value+'.csv');
+}
 
 $('search').oninput=renderHistory;
 function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i,product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();updateInitialPaymentUI();tab('new');window.scrollTo(0,0)}
