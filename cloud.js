@@ -109,7 +109,7 @@ let pendingInitialKey=null,pendingInitialSignature=null;
 $('stockInitialSave').onclick=async()=>{
  if(!isAdmin)return;
  const id=$('stockInitialProduct').value,qty=Number($('stockInitialQty').value),p=db.products.find(x=>x.id===id);
- if(!p||!p.controlaStock||!Number.isSafeInteger(qty)||qty<0||!$('stockInitialQty').value.trim())return alert('Selecciona un producto e ingresa una cantidad inicial válida.');
+ if(!p||!p.controlaStock||!Number.isSafeInteger(qty)||qty<=0||!$('stockInitialQty').value.trim())return alert('Selecciona un producto e ingresa una cantidad inicial válida.');
  const date=p.categoria==='MENU_FINDE'?$('stockDate').value:null;
  if(p.categoria==='MENU_FINDE'&&!date)return alert('Selecciona la fecha del menú.');
  const signature=[id,date||'',qty].join(':');
