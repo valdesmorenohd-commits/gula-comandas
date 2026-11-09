@@ -104,7 +104,7 @@ function renderReports(){if(!isAdmin||!$('reportSummary'))return;const orders=or
 function exportReportCsv(){if(!isAdmin)return;const orders=ordersForReport(),data=[['Comanda','Cliente','Fecha entrega','Estado histórico','Total pedido'],...orders.map(o=>[o.number,o.customer,o.date,o.payment,o.total])];const csv=String.fromCharCode(65279)+data.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join(String.fromCharCode(13,10));download(new Blob([csv],{type:'text/csv;charset=utf-8'}),'Gula-reporte-'+$('reportDate').value+'.csv')}
 
 $('search').oninput=renderHistory;
-function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i},product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();tab('new');window.scrollTo(0,0)}
+function editOrder(id){if(!isAdmin)return;const o=db.orders.find(o=>o.id===id);if(!o||o.cancelada)return;editing=o.id;for(const [k,v] of Object.entries({customer:o.customer,phone:o.phone,deliveryDate:o.date,deliveryTime:o.time,deliveryType:o.deliveryType,payment:o.payment,notes:o.notes}))$(k).value=v;cart=o.items.map(i=>({...i,product_id:i.product_id||null}));$('formTitle').textContent='Editar comanda N.º '+o.number;renderCart();tab('new');window.scrollTo(0,0)}
 let pendingInitialKey=null,pendingInitialSignature=null;
 $('stockInitialSave').onclick=async()=>{
  if(!isAdmin)return;
