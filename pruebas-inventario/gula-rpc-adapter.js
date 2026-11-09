@@ -64,12 +64,13 @@
           p_comanda_id:id,p_monto:amount,p_medio:method,p_clave_idempotencia:operationId
         }));
       },
-      async ajustarStock(productId, dateOrNull, delta, operationId) {
+      async ajustarStock(productId, dateOrNull, delta, operationId, reason) {
         if (!validUuid(productId) || !validUuid(operationId)) throw Error('Identificador inválido.');
         if (!Number.isSafeInteger(delta) || delta === 0) throw Error('Ajuste inválido.');
-        return check(await client.rpc('gula_ajustar_stock',{
+        if (!['PRODUCCION','REPOSICION','MERMA','CORRECCION'].includes(reason)) throw Error('Selecciona un motivo válido.');
+        return check(await client.rpc('gula_ajustar_stock_con_motivo',{
           p_producto_id:productId,p_fecha:dateOrNull,
-          p_delta:delta,p_clave_idempotencia:operationId
+          p_delta:delta,p_clave_idempotencia:operationId,p_motivo:reason
         }));
       }
     });
