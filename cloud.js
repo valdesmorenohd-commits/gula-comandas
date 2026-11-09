@@ -23,7 +23,45 @@ function clearForm(){if($('productSearch'))$('productSearch').value='';editing=n
 function fromOrder(o){const dt=o.fecha_entrega?new Date(o.fecha_entrega):null;const date=dt?new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(dt):'';const time=dt?new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(dt):'';return {id:o.id,number:o.numero,customer:o.cliente,phone:o.telefono,date,time,deliveryType:o.tipo_entrega,payment:o.estado_pago,notes:o.notas,items:o.items,total:o.total,created:o.creado_en}}
 function toDelivery(date,time){const naive=new Date(date+'T'+time+':00Z');const f=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit'});const parts=Object.fromEntries(f.formatToParts(naive).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));const asUTC=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute);return new Date(naive.getTime()+(naive.getTime()-asUTC)).toISOString()}
 async function refresh(){const [p,o,c]=await Promise.all([api.from('gula_productos').select('*').eq('activo',true).order('nombre'),api.from('gula_comandas').select('*').order('numero',{ascending:false}).limit(1000),api.from('gula_configuracion').select('*').eq('clave','general').maybeSingle()]);db.products=check(p).map(x=>({id:x.id,name:x.nombre,price:x.precio}));db.orders=check(o).map(fromOrder);db.settings={footer:'Gracias por preferir Gula',whatsapp:'+56 9 3306 8109',logo:'',...(check(c)?.valor||{})};renderSelect();renderHistory();renderProducts();renderReports();loadSettings()}
-async function saveOrder(){if(!authorized)return null;if(editing&&!isAdmin){alert('Solo el administrador puede editar comandas');return null}const customer=$('customer').value.trim(),date=$('deliveryDate').value,time=$('deliveryTime').value;if(!customer||!date||!time||!cart.length){alert('Completa cliente, fecha, hora y agrega al menos un producto.');return null}const payload={cliente:customer,telefono:$('phone').value.trim(),fecha_entrega:toDelivery(date,time),tipo_entrega:$('deliveryType').value,estado_pago:$('payment').value,notas:$('notes').value.trim(),items:cart.map(i=>({...i})),total:cart.reduce((s,i)=>s+i.qty*i.price,0),actualizado_en:new Date().toISOString()};try{const r=editing?await api.from('gula_comandas').update(payload).eq('id',editing).select().single():await api.from('gula_comandas').insert(payload).select().single();const order=fromOrder(check(r));clearForm();toast('Comanda N.º '+order.number+' guardada. Formulario listo para una nueva.');try{await refresh()}catch(refreshError){console.error('Comanda guardada; falló actualización de pantalla',refreshError);alert('La comanda se guardó, pero no se pudo actualizar el historial. Revisa tu conexión antes de volver a guardarla.')}return order}catch(e){fail(e);return null}}
+// Migración de comandas: apagada hasta configurar un Supabase aislado.
+// Este interruptor NO debe activarse mientras las RPC no estén auditadas.
+const GULA_STAGING_RPC_ENABLED=false;
+let gulaPendingOperation=null;
+function gulaRpcItems(items){
+ if(!items.length)throw Error('Agrega productos a la comanda.');
+ const seen=new Set();
+ return items.map(i=>{
+  if(!i.product_id||!db.products.some(p=>p.id===i.product_id))
+   throw Error('Esta comanda contiene productos antiguos sin identificador. No puede migrarse automáticamente.');
+  if(!Number.isInteger(i.qty)||i.qty<1)throw Error('Cantidad inválida.');
+  if(seen.has(i.product_id))throw Error('Consolida los productos repetidos antes de guardar.');
+  seen.add(i.product_id);
+  return {product_id:i.product_id,qty:i.qty,note:i.note||''};
+ });
+}
+async function gulaSaveViaRpc(customer,date,time){
+ if(!GULA_STAGING_RPC_ENABLED)throw Error('Migración no habilitada.');
+ if(!window.GulaStagingAdapter)throw Error('Falta cargar el adaptador RPC.');
+ const adapter=window.GulaStagingAdapter.makeAdapter(api,true);
+ const order={
+  id:editing,customer,phone:$('phone').value.trim(),
+  deliveryIso:toDelivery(date,time),deliveryType:$('deliveryType').value,
+  notes:$('notes').value.trim(),items:gulaRpcItems(cart)
+ };
+ // No guardar estado de pago desde un selector: solo se deriva de abonos reales.
+ if($('payment').value!=='Pendiente')
+  throw Error('Registra los pagos mediante abonos, no desde el estado de la comanda.');
+ if(editing){
+  const result=await adapter.editar(order);
+  return result.comanda_id;
+ }
+ if(!gulaPendingOperation)gulaPendingOperation=crypto.randomUUID();
+ // Conservar clave tras fallo de red ambiguo para evitar doble descuento.
+ const result=await adapter.crear(order,gulaPendingOperation);
+ gulaPendingOperation=null;
+ return result.comanda_id;
+}
+async function saveOrder(){if(!authorized)return null;if(editing&&!isAdmin){alert('Solo el administrador puede editar comandas');return null}const customer=$('customer').value.trim(),date=$('deliveryDate').value,time=$('deliveryTime').value;if(!customer||!date||!time||!cart.length){alert('Completa cliente, fecha, hora y agrega al menos un producto.');return null}const payload={cliente:customer,telefono:$('phone').value.trim(),fecha_entrega:toDelivery(date,time),tipo_entrega:$('deliveryType').value,estado_pago:$('payment').value,notas:$('notes').value.trim(),items:cart.map(i=>({...i})),total:cart.reduce((s,i)=>s+i.qty*i.price,0),actualizado_en:new Date().toISOString()};try{if(GULA_STAGING_RPC_ENABLED){const id=await gulaSaveViaRpc(customer,date,time);const rr=await api.from('gula_comandas').select('*').eq('id',id).single();const order=fromOrder(check(rr));clearForm();toast('Comanda N.º '+order.number+' guardada con RPC de pruebas.');await refresh();return order;}const r=editing?await api.from('gula_comandas').update(payload).eq('id',editing).select().single():await api.from('gula_comandas').insert(payload).select().single();const order=fromOrder(check(r));clearForm();toast('Comanda N.º '+order.number+' guardada. Formulario listo para una nueva.');try{await refresh()}catch(refreshError){console.error('Comanda guardada; falló actualización de pantalla',refreshError);alert('La comanda se guardó, pero no se pudo actualizar el historial. Revisa tu conexión antes de volver a guardarla.')}return order}catch(e){fail(e);return null}}
 $('save').onclick=saveOrder;$('savePrint').onclick=async()=>{const o=await saveOrder();if(o)await makePDF(o)};$('clear').onclick=clearForm;
 function renderHistory(){
  const q=$('search').value.toLowerCase();
