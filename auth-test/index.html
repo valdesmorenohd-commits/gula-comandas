@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es-CL">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gula 2.0 · Prueba de acceso</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:light}body{margin:0;background:#f3f3ef;color:#222}.wrap{max-width:440px;margin:auto;padding:28px 18px}h1{font-size:2rem;margin:.2em 0}h2{font-size:1.1rem}p{line-height:1.5}.notice{background:#fff3d3;border-left:5px solid #ac7a00;padding:12px;border-radius:6px;margin:24px 0}form,.panel{background:#fff;padding:24px;border:1px solid #ddd;border-radius:18px;box-shadow:0 10px 24px #00000008}label{display:block;font-weight:600;margin:14px 0 5px}input,button{font:inherit;box-sizing:border-box;width:100%;padding:14px;border-radius:10px}input{border:1px solid #888}button{background:#1e1e1e;color:white;border:0;margin-top:20px;font-weight:650;cursor:pointer}button:disabled{opacity:.6}button.secondary{background:#ddd;color:#222}#status{margin:15px 0;overflow-wrap:anywhere}.muted{color:#666;font-size:.85rem}output{display:block;margin-top:10px}a{color:#245cae}
+</style></head>
+<body><main class="wrap"><h1>GULA</h1><h2>Comandas 2.0 · Prueba de inicio de sesión</h2>
+<div class="notice"><strong>ENTORNO DE PRUEBAS</strong><p>Esta página solo verifica Firebase Authentication. No genera comandas, no guarda ventas y no consulta Firestore.</p></div>
+<p id="status" role="status">Conectando con Firebase…</p>
+<form id="login" hidden><label for="email">Correo</label><input id="email" type="email" autocomplete="username" required><label for="password">Contraseña</label><input id="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">Ingresar</button><output id="error" aria-live="polite"></output></form>
+<div id="logged" class="panel" hidden><strong>Sesión iniciada</strong><p id="who"></p><p class="muted">La autenticación fue exitosa. Los permisos de administrador y la conexión segura a comandas están pendientes.</p><button class="secondary" id="logout">Cerrar sesión</button></div>
+<p class="muted">Proyecto exclusivo: gula-comandas-2-0-pruebas · No utilizar para operaciones reales.</p>
+</main>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+const app=initializeApp({apiKey:"AIzaSyA_56edZKtiysPPNc9geqA687gQBXjGxgY",authDomain:"gula-comandas-2-0-pruebas.firebaseapp.com",projectId:"gula-comandas-2-0-pruebas",storageBucket:"gula-comandas-2-0-pruebas.firebasestorage.app",messagingSenderId:"230420123464",appId:"1:230420123464:web:63564b926d6bbfee70ed7d"});
+const auth=getAuth(app),form=document.getElementById('login'),logged=document.getElementById('logged'),status=document.getElementById('status'),error=document.getElementById('error'),submit=document.getElementById('submit');
+onAuthStateChanged(auth,u=>{form.hidden=!!u;logged.hidden=!u;status.textContent=u?'Firebase Authentication: conectado':'Inicia sesión con el usuario registrado en Firebase';document.getElementById('who').textContent=u?'Cuenta: '+(u.email||'usuario autenticado'):''},e=>{status.textContent='No fue posible comprobar la sesión: '+e.code});
+form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;error.textContent='';try{await signInWithEmailAndPassword(auth,document.getElementById('email').value,document.getElementById('password').value);document.getElementById('password').value=''}catch(ex){error.textContent='No se pudo ingresar ('+(ex.code||'error')+'). Verifica correo y contraseña.'}finally{submit.disabled=false}});
+document.getElementById('logout').addEventListener('click',async()=>{await signOut(auth)});
+</script></body></html>
